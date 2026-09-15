@@ -1,0 +1,39 @@
+{
+  "name": "fairprint",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource-variable/archivo": "^5.3.0",
+    "@number-flow/react": "^0.6.2",
+    "@tanstack/react-query": "^5.102.8",
+    "@types/pg": "^8.23.1",
+    "dotenv": "17.3.1",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "motion": "^13.2.0",
+    "next": "16.2.6",
+    "pg": "^8.23.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.17",
+    "@types/node": "22.19.15",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "postcss": "8.5.8",
+    "tailwindcss": "4.1.17",
+    "typescript": "5.9.3"
+  },
+  "description": "Pre-trade fair-value and liquidity measurement for tokenized stocks on Solana",
+  "license": "MIT",
+  "homepage": "https://temporary-fleet-gust-kpypgd3.vercel.app"
+}
