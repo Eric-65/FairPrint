@@ -78,7 +78,9 @@ async function collectAssetObservation(
         ? "issuer"
         : snapshot?.source.reference === "Pyth Hermes"
           ? "pyth"
-          : null,
+          : snapshot?.source.reference === "Jupiter stockData"
+            ? "jupiter"
+            : null,
     referencePublishedAt:
       snapshot?.freshness.referenceUpdatedAt || snapshot?.freshness.pythPublishedAt
         ? new Date(

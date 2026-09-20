@@ -4,6 +4,7 @@ export const JUPITER_QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote";
 const HERMES_BASE_URL = "https://hermes.pyth.network";
 const REQUEST_TIMEOUT_MS = 8_000;
 const JUPITER_KEY_NAME = ["JUPITER", "API", "KEY"].join("_");
+const PYTH_KEY_NAME = ["PYTH", "API", "KEY"].join("_");
 
 export type GateState = "fair" | "caution" | "overpay" | "unavailable";
 export type MarketPeriod = "market" | "extended" | "overnight" | "closed";
@@ -59,11 +60,19 @@ interface OracleResponse {
   nodes: OracleNode[];
 }
 
+interface JupiterStockData {
+  id?: string;
+  price?: number;
+  mcap?: number;
+  updatedAt?: string;
+}
+
 interface JupiterPriceEntry {
   usdPrice?: number;
   blockId?: number;
   decimals?: number;
   liquidity?: number;
+  stockData?: JupiterStockData;
 }
 
 interface JupiterPriceResponse {
@@ -125,7 +134,7 @@ export interface TickerSnapshot {
   source: {
     asset: "xStocks Public API";
     onchain: "Jupiter Price v3";
-    reference: "xStocks Public API" | "Pyth Hermes" | null;
+    reference: "xStocks Public API" | "Pyth Hermes" | "Jupiter stockData" | null;
     oracleManager: string | null;
     pythFeedId: string | null;
     jupiterBlockId: number | null;
@@ -203,9 +212,22 @@ export function gateState(premium: number | null): GateState {
 }
 
 async function fetchHermesReference(feedId: string): Promise<ReferenceReading> {
+  // Since the Pyth Core upgrade (26 Aug 2026) Hermes rejects unauthenticated
+  // requests with 401. Register at Pyth Terminal and set PYTH_API_KEY.
+  const apiKey = process.env[PYTH_KEY_NAME];
+  if (!apiKey) {
+    return {
+      price: null,
+      confidence: null,
+      updatedAt: null,
+      error: `Pyth Hermes requires ${PYTH_KEY_NAME} (unset)`,
+    };
+  }
+
   try {
     const response = await fetchJson<HermesResponse>(
       `${HERMES_BASE_URL}/v2/updates/price/latest?ids%5B%5D=${encodeURIComponent(feedId)}`,
+      { authorization: `Bearer ${apiKey}` },
     );
     const update = response.parsed?.find(
       (item) => item.id.replace(/^0x/, "").toLowerCase() === feedId.replace(/^0x/, "").toLowerCase(),
@@ -305,13 +327,21 @@ export async function getTickerSnapshot(
   const jupiter = jupiterResult.value[solana.address];
   const onchainPrice = finiteNumber(jupiter?.usdPrice);
   const issuerQuote = finiteNumber(issuerResult.value.quote);
-  const referencePrice = issuerQuote ?? hermes.price;
+  // Jupiter publishes the underlying stock's reference price alongside the
+  // on-chain quote for xStocks mints. It is the last resort when both the
+  // issuer quote and Pyth are unavailable.
+  const jupiterStockQuote = finiteNumber(jupiter?.stockData?.price);
+  const jupiterStockUpdatedAt = jupiter?.stockData?.updatedAt ?? null;
+  const referencePrice = issuerQuote ?? hermes.price ?? jupiterStockQuote;
   const usesHermes = issuerQuote === null && hermes.price !== null;
+  const usesJupiterStock = issuerQuote === null && hermes.price === null && jupiterStockQuote !== null;
   const referenceSource = issuerQuote !== null
     ? "xStocks Public API" as const
     : usesHermes
       ? "Pyth Hermes" as const
-      : null;
+      : usesJupiterStock
+        ? "Jupiter stockData" as const
+        : null;
   const referenceConfidence = hermes.confidence;
   const confidenceLower = referencePrice !== null && referenceConfidence !== null
     ? referencePrice - referenceConfidence
@@ -334,6 +364,7 @@ export async function getTickerSnapshot(
     const referenceFailures = [
       issuerResult.error ?? "the issuer quote is unavailable in the current market period",
       hermes.error ?? oracleResult.error,
+      "Jupiter stockData carried no reference price",
     ].filter((reason): reason is string => Boolean(reason));
     missing.push(referenceFailures.join("; ") || "no reference price source returned a value");
   }
@@ -372,7 +403,11 @@ export async function getTickerSnapshot(
     },
     freshness: {
       fetchedAt: new Date().toISOString(),
-      referenceUpdatedAt: usesHermes ? hermes.updatedAt : null,
+      referenceUpdatedAt: usesHermes
+        ? hermes.updatedAt
+        : usesJupiterStock
+          ? jupiterStockUpdatedAt
+          : null,
       pythPublishedAt: hermes.updatedAt,
     },
     degraded: {
