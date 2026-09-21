@@ -2,6 +2,7 @@ import "server-only";
 
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { ensureSchema } from "@/db/bootstrap";
 import { dailyStats, observations, type NewObservation } from "@/db/schema";
 import { getTickerSnapshots, type TickerSnapshotResult } from "./market-data";
 import { measureLiquidity } from "./liquidity";
@@ -117,7 +118,10 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
     };
   }
 
-  const snapshots = await getTickerSnapshots(TRACKED_ASSETS);
+  const [snapshots] = await Promise.all([
+    getTickerSnapshots(TRACKED_ASSETS),
+    ensureSchema(db),
+  ]);
   const snapshotsBySymbol = new Map(snapshots.map((result) => [result.symbol, result]));
   const rows = await Promise.all(
     TRACKED_ASSETS.map((asset) =>
@@ -196,6 +200,7 @@ export async function getLatestArchivedLiquidity(): Promise<
     return { data: [], degradedReason: ARCHIVE_NOT_CONFIGURED };
   }
 
+  await ensureSchema(db);
   const result = await db.execute(sql<ArchivedLiquidity>`
     select distinct on (symbol)
       symbol,
@@ -224,6 +229,7 @@ export async function getWidestGap24h(): Promise<ArchiveRead<WidestGap | null>> 
     return { data: null, degradedReason: ARCHIVE_NOT_CONFIGURED };
   }
 
+  await ensureSchema(db);
   const result = await db.execute(sql<WidestGap>`
     select symbol, premium_pct as "premiumPct", observed_at as "observedAt"
     from ${observations}
@@ -255,6 +261,7 @@ export async function rollupDailyStats(date?: string) {
     };
   }
 
+  await ensureSchema(db);
   const result = await db.execute(sql`
     insert into ${dailyStats} (
       date,
