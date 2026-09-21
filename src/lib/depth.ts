@@ -8,7 +8,12 @@ const JUPITER_KEY_NAME = ["JUPITER", "API", "KEY"].join("_");
 const USDC_DECIMALS = 6;
 const MIN_NOTIONAL_USD = 100;
 const MAX_NOTIONAL_USD = 100_000;
-const SEARCH_ITERATIONS = 8;
+// Jupiter budgets are tight (30/min keyless, 60/min free key), so the search
+// is seeded from the 1k impact and capped at 7 probes per mint:
+// 1k, seed, up to 3 expansions, then 2 bisections.
+const EXPANSION_FACTOR = 4;
+const MAX_EXPANSION_PROBES = 3;
+const MAX_REFINEMENT_PROBES = 2;
 const REQUEST_TIMEOUT_MS = 8_000;
 const BASE_SIGNATURE_FEE_LAMPORTS = 5_000;
 
@@ -78,6 +83,7 @@ const depthCache = globalThis.fairPrintDepthCache ?? new Map<string, DepthCacheE
 if (process.env.NODE_ENV !== "production") globalThis.fairPrintDepthCache = depthCache;
 
 export class UnfillableQuoteError extends Error {}
+export class RateLimitedError extends Error {}
 
 function apiHeaders() {
   const apiKey = process.env[JUPITER_KEY_NAME];
@@ -120,6 +126,9 @@ async function fetchQuote(
   });
   const body = (await response.json().catch(() => null)) as JupiterQuoteResponse | null;
 
+  if (response.status === 429) {
+    throw new RateLimitedError("Jupiter Quote returned 429 (rate limit reached)");
+  }
   if (!response.ok) {
     const detail = body?.error || `Jupiter Quote returned ${response.status}`;
     if (/route|tradable|liquidity|consume|oracle/i.test(detail)) {
@@ -167,53 +176,69 @@ export async function measureDepth(
   };
 
   const atOneThousand = await quote(1_000);
-  const atCeiling = await quote(MAX_NOTIONAL_USD).catch((error: unknown) => {
-    if (error instanceof UnfillableQuoteError) return null;
-    throw error;
-  });
-
-  if (atCeiling && atCeiling.impactDecimal <= impactLimitDecimal) {
-    return {
-      maxFillableUsd: MAX_NOTIONAL_USD,
-      priceImpactAt1kPct: atOneThousand.impactDecimal * 100,
-      routeLabel: atOneThousand.routeLabel,
-      probes,
-      tolerancePct: tolerance,
-    };
-  }
-
-  const atFloor = await quote(MIN_NOTIONAL_USD).catch((error: unknown) => {
-    if (error instanceof UnfillableQuoteError) return null;
-    throw error;
-  });
-  let low = MIN_NOTIONAL_USD;
-  let high = MAX_NOTIONAL_USD;
-  let best = atFloor && atFloor.impactDecimal <= impactLimitDecimal
-    ? MIN_NOTIONAL_USD
-    : 0;
-
-  for (let iteration = 0; iteration < SEARCH_ITERATIONS; iteration += 1) {
-    const midpoint = (low + high) / 2;
-    const midpointQuote = await quote(midpoint).catch((error: unknown) => {
+  const tryQuote = (notional: number) =>
+    quote(notional).catch((error: unknown) => {
       if (error instanceof UnfillableQuoteError) return null;
       throw error;
     });
-
-    if (midpointQuote && midpointQuote.impactDecimal <= impactLimitDecimal) {
-      best = midpoint;
-      low = midpoint;
-    } else {
-      high = midpoint;
-    }
-  }
-
-  return {
+  const fits = (parsed: ParsedQuote | null) =>
+    parsed !== null && parsed.impactDecimal <= impactLimitDecimal;
+  const finish = (best: number) => ({
     maxFillableUsd: Math.floor(best),
     priceImpactAt1kPct: atOneThousand.impactDecimal * 100,
     routeLabel: atOneThousand.routeLabel,
     probes,
     tolerancePct: tolerance,
-  };
+  });
+
+  // Bracket [low, high] where low is known to fit and high is known not to.
+  let low: number;
+  let high: number;
+
+  if (!fits(atOneThousand)) {
+    // Thin route: the answer lies below $1k, if anywhere.
+    if (!fits(await tryQuote(MIN_NOTIONAL_USD))) return finish(0);
+    low = MIN_NOTIONAL_USD;
+    high = 1_000;
+  } else {
+    // Impact grows roughly linearly with size on AMM routes, so extrapolate
+    // from the 1k reading, then expand geometrically until a probe fails.
+    const projected = atOneThousand.impactDecimal > 0
+      ? (1_000 * impactLimitDecimal) / atOneThousand.impactDecimal
+      : MAX_NOTIONAL_USD;
+    const seed = Math.min(MAX_NOTIONAL_USD, Math.max(2_000, projected * 0.75));
+
+    if (fits(await tryQuote(seed))) {
+      low = seed;
+      high = MAX_NOTIONAL_USD;
+      let bracketed = false;
+      for (let expansion = 0; expansion < MAX_EXPANSION_PROBES && low < MAX_NOTIONAL_USD; expansion += 1) {
+        const next = Math.min(MAX_NOTIONAL_USD, low * EXPANSION_FACTOR);
+        if (fits(await tryQuote(next))) {
+          low = next;
+        } else {
+          high = next;
+          bracketed = true;
+          break;
+        }
+      }
+      if (low >= MAX_NOTIONAL_USD) return finish(MAX_NOTIONAL_USD);
+      // Expansion budget ran out below the ceiling without a failing probe:
+      // report the largest verified size rather than spend more requests.
+      if (!bracketed) return finish(low);
+    } else {
+      low = 1_000;
+      high = seed;
+    }
+  }
+
+  for (let iteration = 0; iteration < MAX_REFINEMENT_PROBES; iteration += 1) {
+    const midpoint = (low + high) / 2;
+    if (fits(await tryQuote(midpoint))) low = midpoint;
+    else high = midpoint;
+  }
+
+  return finish(low);
 }
 
 export function getCachedDepth(mint: string, tolerancePct = 1) {

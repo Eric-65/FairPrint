@@ -5,10 +5,19 @@ import { getDb } from "@/db";
 import { ensureSchema } from "@/db/bootstrap";
 import { dailyStats, observations, type NewObservation } from "@/db/schema";
 import { getTickerSnapshots, type TickerSnapshotResult } from "./market-data";
-import { measureLiquidity } from "./liquidity";
+import { measureLiquidity, type LiquidityMeasurement } from "./liquidity";
 import { TRACKED_ASSETS, type TrackedAsset } from "./tracked-assets";
 
 export const ARCHIVE_NOT_CONFIGURED = "Archive is not configured";
+
+// Every run records prices for all symbols but probes route depth for only the
+// stalest few, keeping Jupiter quote traffic inside the free-tier budget.
+// Depth readings stay valid on the watchlist for DEPTH_STALE_MINUTES.
+const DEPTH_SYMBOLS_PER_RUN = Math.max(
+  1,
+  Math.min(TRACKED_ASSETS.length, Number(process.env.DEPTH_SYMBOLS_PER_RUN) || 4),
+);
+const DEPTH_STALE_MINUTES = 30;
 
 export interface ArchiveRead<T> {
   data: T;
@@ -24,6 +33,7 @@ interface ObservationRunSummary {
     symbol: string;
     premiumPct: number;
   } | null;
+  depthMeasured: string[];
   degradedReasons: Record<string, number>;
   degradedReason: string | null;
 }
@@ -39,20 +49,18 @@ function incrementReason(reasons: Record<string, number>, value: string | null) 
   }
 }
 
-async function collectAssetObservation(
+function collectAssetObservation(
   asset: TrackedAsset,
   observedAt: Date,
   snapshotResult: TickerSnapshotResult,
-): Promise<NewObservation> {
-  const [liquidityResult] = await Promise.allSettled([
-    measureLiquidity(asset.mint),
-  ]);
+  liquidityResult: PromiseSettledResult<LiquidityMeasurement> | null,
+): NewObservation {
   const degradedReasons: string[] = [];
 
   if (snapshotResult.error) {
     degradedReasons.push(`Fair value: ${snapshotResult.error}`);
   }
-  if (liquidityResult.status === "rejected") {
+  if (liquidityResult?.status === "rejected") {
     const reason = errorMessage(liquidityResult.reason, "Liquidity measurement failed");
     console.error("[FairPrint archive] Liquidity measurement failed", {
       symbol: asset.symbol,
@@ -63,7 +71,7 @@ async function collectAssetObservation(
   }
 
   const snapshot = snapshotResult.snapshot;
-  const liquidity = liquidityResult.status === "fulfilled" ? liquidityResult.value : null;
+  const liquidity = liquidityResult?.status === "fulfilled" ? liquidityResult.value : null;
   if (snapshot?.degraded.reason) degradedReasons.push(snapshot.degraded.reason);
   if (liquidity?.degradedReasons.length) degradedReasons.push(...liquidity.degradedReasons);
 
@@ -103,6 +111,43 @@ async function collectAssetObservation(
   };
 }
 
+async function pickDepthSymbols(db: NonNullable<ReturnType<typeof getDb>>) {
+  const result = await db.execute(sql<{ symbol: string; lastDepthAt: Date | null }>`
+    select symbol, max(observed_at) as "lastDepthAt"
+    from ${observations}
+    where depth_1pct_usd is not null
+      and symbol in (${trackedSymbolSql()})
+    group by symbol
+  `);
+  const lastDepthAt = new Map(
+    (result.rows as unknown as { symbol: string; lastDepthAt: Date | null }[]).map(
+      (row) => [row.symbol, row.lastDepthAt ? new Date(row.lastDepthAt).getTime() : 0],
+    ),
+  );
+
+  return [...TRACKED_ASSETS]
+    .sort((left, right) =>
+      (lastDepthAt.get(left.symbol) ?? 0) - (lastDepthAt.get(right.symbol) ?? 0))
+    .slice(0, DEPTH_SYMBOLS_PER_RUN);
+}
+
+async function measureScheduledLiquidity(assets: readonly TrackedAsset[]) {
+  const results = new Map<string, PromiseSettledResult<LiquidityMeasurement>>();
+  // Sequential on purpose: probes for one mint are already serial, and running
+  // mints in parallel is what tripped the Jupiter sliding-window limit.
+  for (const asset of assets) {
+    const [result] = await Promise.allSettled([measureLiquidity(asset.mint)]);
+    results.set(asset.symbol, result);
+    if (result.status === "fulfilled" && result.value.rateLimited) {
+      console.warn("[FairPrint archive] Jupiter rate limit reached; deferring remaining depth probes", {
+        measured: [...results.keys()],
+      });
+      break;
+    }
+  }
+  return results;
+}
+
 export async function recordObservations(): Promise<ObservationRunSummary> {
   const observedAt = new Date();
   const db = getDb();
@@ -113,27 +158,28 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
       inserted: 0,
       degraded: 0,
       widestPremium: null,
+      depthMeasured: [],
       degradedReasons: { [ARCHIVE_NOT_CONFIGURED]: 1 },
       degradedReason: ARCHIVE_NOT_CONFIGURED,
     };
   }
 
-  const [snapshots] = await Promise.all([
+  await ensureSchema(db);
+  const [snapshots, liquidityBySymbol] = await Promise.all([
     getTickerSnapshots(TRACKED_ASSETS),
-    ensureSchema(db),
+    pickDepthSymbols(db).then(measureScheduledLiquidity),
   ]);
   const snapshotsBySymbol = new Map(snapshots.map((result) => [result.symbol, result]));
-  const rows = await Promise.all(
-    TRACKED_ASSETS.map((asset) =>
-      collectAssetObservation(
-        asset,
-        observedAt,
-        snapshotsBySymbol.get(asset.symbol) ?? {
-          symbol: asset.symbol,
-          snapshot: null,
-          error: "Ticker was omitted from the batch result",
-        },
-      ),
+  const rows = TRACKED_ASSETS.map((asset) =>
+    collectAssetObservation(
+      asset,
+      observedAt,
+      snapshotsBySymbol.get(asset.symbol) ?? {
+        symbol: asset.symbol,
+        snapshot: null,
+        error: "Ticker was omitted from the batch result",
+      },
+      liquidityBySymbol.get(asset.symbol) ?? null,
     ),
   );
 
@@ -165,6 +211,9 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
     inserted: inserted.length,
     degraded: inserted.filter((row) => row.degraded).length,
     widestPremium,
+    depthMeasured: rows
+      .filter((row) => row.depth1PctUsd !== null && row.depth1PctUsd !== undefined)
+      .map((row) => row.symbol),
     degradedReasons,
     degradedReason: null,
   };
@@ -201,8 +250,10 @@ export async function getLatestArchivedLiquidity(): Promise<
   }
 
   await ensureSchema(db);
-  const result = await db.execute(sql<ArchivedLiquidity>`
-    select distinct on (symbol)
+  // Depth is probed on a rotation, so the newest row for a symbol usually has
+  // no depth. Prefer the most recent measured reading inside the freshness
+  // window and fall back to the newest row so its degraded reason surfaces.
+  const columns = sql`
       symbol,
       depth_1pct_usd as "depth1PctUsd",
       price_impact_at_1k_pct as "priceImpactAt1kPct",
@@ -211,14 +262,32 @@ export async function getLatestArchivedLiquidity(): Promise<
       pool_volume_24h_usd as "poolVolume24hUsd",
       observed_at as "observedAt",
       degraded,
-      degraded_reason as "degradedReason"
-    from ${observations}
-    where symbol in (${trackedSymbolSql()})
-    order by symbol, observed_at desc
-  `);
+      degraded_reason as "degradedReason"`;
+  const [measured, latest] = await Promise.all([
+    db.execute(sql<ArchivedLiquidity>`
+      select distinct on (symbol) ${columns}
+      from ${observations}
+      where symbol in (${trackedSymbolSql()})
+        and depth_1pct_usd is not null
+        and observed_at >= now() - make_interval(mins => ${DEPTH_STALE_MINUTES})
+      order by symbol, observed_at desc
+    `),
+    db.execute(sql<ArchivedLiquidity>`
+      select distinct on (symbol) ${columns}
+      from ${observations}
+      where symbol in (${trackedSymbolSql()})
+      order by symbol, observed_at desc
+    `),
+  ]);
+  const bySymbol = new Map(
+    (latest.rows as unknown as ArchivedLiquidity[]).map((row) => [row.symbol, row]),
+  );
+  for (const row of measured.rows as unknown as ArchivedLiquidity[]) {
+    bySymbol.set(row.symbol, row);
+  }
 
   return {
-    data: result.rows as unknown as ArchivedLiquidity[],
+    data: [...bySymbol.values()],
     degradedReason: null,
   };
 }

@@ -1,9 +1,14 @@
 const XSTOCKS_BASE_URL = "https://api.xstocks.fi/api/v2";
-export const JUPITER_PRICE_URL = "https://lite-api.jup.ag/price/v3";
-export const JUPITER_QUOTE_URL = "https://lite-api.jup.ag/swap/v1/quote";
+const JUPITER_KEY_NAME = ["JUPITER", "API", "KEY"].join("_");
+// Keyless lite-api is capped at 30 requests/min (and deprecated); a free key
+// from portal.jup.ag raises that to 60/min but must be sent to api.jup.ag.
+const JUPITER_HOST = process.env[JUPITER_KEY_NAME]
+  ? "https://api.jup.ag"
+  : "https://lite-api.jup.ag";
+export const JUPITER_PRICE_URL = `${JUPITER_HOST}/price/v3`;
+export const JUPITER_QUOTE_URL = `${JUPITER_HOST}/swap/v1/quote`;
 const HERMES_BASE_URL = "https://hermes.pyth.network";
 const REQUEST_TIMEOUT_MS = 8_000;
-const JUPITER_KEY_NAME = ["JUPITER", "API", "KEY"].join("_");
 const PYTH_KEY_NAME = ["PYTH", "API", "KEY"].join("_");
 
 export type GateState = "fair" | "caution" | "overpay" | "unavailable";

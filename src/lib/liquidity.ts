@@ -1,6 +1,6 @@
 import "server-only";
 
-import { measureDepth } from "./depth";
+import { measureDepth, RateLimitedError } from "./depth";
 
 const METEORA_POOLS_URL = "https://dlmm.datapi.meteora.ag/pools";
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -25,6 +25,7 @@ export interface LiquidityMeasurement {
   priceImpactAt1kPct: number | null;
   probes: number;
   tolerancePct: number;
+  rateLimited: boolean;
   degradedReasons: string[];
 }
 
@@ -104,6 +105,8 @@ export async function measureLiquidity(
     poolTvlUsd: meteoraResult.status === "fulfilled" ? meteoraResult.value.poolTvlUsd : null,
     poolVolume24hUsd:
       meteoraResult.status === "fulfilled" ? meteoraResult.value.poolVolume24hUsd : null,
+    rateLimited:
+      depthResult.status === "rejected" && depthResult.reason instanceof RateLimitedError,
     degradedReasons,
   };
 }
