@@ -86,6 +86,9 @@ function liquidityFields(
   if (liquidity?.degradedReasons.length) degradedReasons.push(...liquidity.degradedReasons);
 
   return {
+    // A rate-limited probe never reached Jupiter's answer, so it should stay
+    // at the front of the rotation rather than count as an attempt.
+    depthProbed: liquidityResult !== null && !liquidity?.rateLimited,
     routeLabel: liquidity?.routeLabel ?? null,
     poolTvlUsd: liquidity?.poolTvlUsd ?? null,
     poolVolume24hUsd: liquidity?.poolVolume24hUsd ?? null,
@@ -190,10 +193,14 @@ async function pickDepthTargets(
     ...TRACKED_ASSETS.map((asset) => ({ venue: "xstocks" as const, symbol: asset.symbol, mint: asset.mint })),
     ...preStocksAssets.map((asset) => ({ venue: "prestocks" as const, symbol: asset.symbol, mint: asset.mint })),
   ];
+  // Rotate on the last probe attempt, not the last success: a ticker with no
+  // Jupiter route never succeeds, and ordering by success would re-pick it
+  // every run and starve every other ticker of fresh depth.
   const result = await db.execute(sql<{ venue: ObservationVenue; symbol: string; lastDepthAt: Date | null }>`
     select venue, symbol, max(observed_at) as "lastDepthAt"
     from ${observations}
-    where depth_1pct_usd is not null
+    where (depth_probed or depth_1pct_usd is not null)
+      and observed_at >= now() - interval '1 day'
     group by venue, symbol
   `);
   const lastDepthAt = new Map(

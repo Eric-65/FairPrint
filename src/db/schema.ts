@@ -43,6 +43,7 @@ export const observations = pgTable(
     poolVolume24hUsd: doublePrecision("pool_volume_24h_usd"),
     depth1PctUsd: doublePrecision("depth_1pct_usd"),
     priceImpactAt1kPct: doublePrecision("price_impact_at_1k_pct"),
+    depthProbed: boolean("depth_probed").notNull().default(false),
     degraded: boolean("degraded").notNull().default(false),
     degradedReason: text("degraded_reason"),
   },
