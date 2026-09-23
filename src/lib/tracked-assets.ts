@@ -1,6 +1,7 @@
 export interface TrackedAsset {
   symbol: string;
-  mint: string;
+  // null: resolved at runtime from the xStocks asset record's Solana deployment.
+  mint: string | null;
   liquidityClass: "liquid" | "thin";
 }
 
@@ -25,6 +26,18 @@ export const TRACKED_ASSETS: readonly TrackedAsset[] = [
   { symbol: "GMEx", mint: "Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc", liquidityClass: "thin" },
   { symbol: "INTCx", mint: "XshPgPdXFRWB8tP1j82rebb2Q9rPgGX37RuqzohmArM", liquidityClass: "thin" },
   { symbol: "AMDx", mint: "XsXcJ6GZ9kVnjqGsjBnktRcuwMBmvKWh8S93RefZ1rF", liquidityClass: "thin" },
+  { symbol: "AVGOx", mint: null, liquidityClass: "thin" },
+  { symbol: "PLTRx", mint: null, liquidityClass: "thin" },
+  { symbol: "ORCLx", mint: null, liquidityClass: "thin" },
+  { symbol: "CRMx", mint: null, liquidityClass: "thin" },
+  { symbol: "CRWDx", mint: null, liquidityClass: "thin" },
+  { symbol: "APPx", mint: null, liquidityClass: "thin" },
+  { symbol: "LLYx", mint: null, liquidityClass: "thin" },
+  { symbol: "UNHx", mint: null, liquidityClass: "thin" },
+  { symbol: "Vx", mint: null, liquidityClass: "thin" },
+  { symbol: "MAx", mint: null, liquidityClass: "thin" },
+  { symbol: "WMTx", mint: null, liquidityClass: "thin" },
+  { symbol: "XOMx", mint: null, liquidityClass: "thin" },
 ] as const;
 
 export function findTrackedAsset(symbol: string) {

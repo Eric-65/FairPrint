@@ -4,7 +4,11 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { ensureSchema } from "@/db/bootstrap";
 import { dailyStats, observations, type NewObservation } from "@/db/schema";
-import { getTickerSnapshots, type TickerSnapshotResult } from "./market-data";
+import {
+  getTickerSnapshots,
+  withResolvedMints,
+  type TickerSnapshotResult,
+} from "./market-data";
 import { measureLiquidity, type LiquidityMeasurement } from "./liquidity";
 import { getCachedPreStocksAssets, type PreStocksAsset } from "./prestocks";
 import { TRACKED_ASSETS, type TrackedAsset } from "./tracked-assets";
@@ -98,7 +102,7 @@ function liquidityFields(
 }
 
 function collectAssetObservation(
-  asset: TrackedAsset,
+  asset: TrackedAsset & { mint: string },
   observedAt: Date,
   snapshotResult: TickerSnapshotResult,
   liquidityResult: PromiseSettledResult<LiquidityMeasurement> | null,
@@ -187,10 +191,11 @@ function collectPreStocksObservation(
 
 async function pickDepthTargets(
   db: NonNullable<ReturnType<typeof getDb>>,
+  xStocksAssets: readonly (TrackedAsset & { mint: string })[],
   preStocksAssets: readonly PreStocksAsset[],
 ): Promise<DepthTarget[]> {
   const targets: DepthTarget[] = [
-    ...TRACKED_ASSETS.map((asset) => ({ venue: "xstocks" as const, symbol: asset.symbol, mint: asset.mint })),
+    ...xStocksAssets.map((asset) => ({ venue: "xstocks" as const, symbol: asset.symbol, mint: asset.mint })),
     ...preStocksAssets.map((asset) => ({ venue: "prestocks" as const, symbol: asset.symbol, mint: asset.mint })),
   ];
   // Rotate on the last probe attempt, not the last success: a ticker with no
@@ -250,6 +255,11 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
   }
 
   await ensureSchema(db);
+  // A ticker whose mint can't be resolved can't be priced, probed, or stored.
+  const xStocksAssets = (await withResolvedMints(TRACKED_ASSETS)).filter(
+    (asset): asset is TrackedAsset & { mint: string } => asset.mint !== null,
+  );
+  const unresolved = TRACKED_ASSETS.length - xStocksAssets.length;
   const preStocksPromise = getCachedPreStocksAssets().then(
     (assets) => ({ assets, error: null as string | null }),
     (error: unknown) => {
@@ -258,15 +268,15 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
     },
   );
   const [snapshots, preStocks, liquidityByKey] = await Promise.all([
-    getTickerSnapshots(TRACKED_ASSETS),
+    getTickerSnapshots(xStocksAssets),
     preStocksPromise,
     preStocksPromise
-      .then(({ assets }) => pickDepthTargets(db, assets))
+      .then(({ assets }) => pickDepthTargets(db, xStocksAssets, assets))
       .then(measureScheduledLiquidity),
   ]);
   const snapshotsBySymbol = new Map(snapshots.map((result) => [result.symbol, result]));
   const rows = [
-    ...TRACKED_ASSETS.map((asset) =>
+    ...xStocksAssets.map((asset) =>
       collectAssetObservation(
         asset,
         observedAt,
@@ -311,10 +321,13 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
   if (preStocks.error) {
     incrementReason(degradedReasons, `PreStocks: ${preStocks.error}`);
   }
+  if (unresolved > 0) {
+    degradedReasons["xStocks mint lookup failed"] = unresolved;
+  }
 
   return {
     observedAt: observedAt.toISOString(),
-    attempted: rows.length,
+    attempted: TRACKED_ASSETS.length + preStocks.assets.length,
     inserted: inserted.length,
     degraded: inserted.filter((row) => row.degraded).length,
     widestPremium,

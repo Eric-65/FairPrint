@@ -78,7 +78,7 @@ function utcTimestamp(value: string) {
 
 function LoadingRows() {
   return (
-    <div className="watch-rows" aria-label="Measuring twenty xStocks">
+    <div className="watch-rows" aria-label="Measuring tracked xStocks">
       {Array.from({ length: 8 }, (_, index) => (
         <div className="watch-row watch-row--loading" key={index}>
           <span className="skeleton skeleton--symbol" />
@@ -237,7 +237,7 @@ export function Watchlist() {
       <div className="source-failure" role="status">
         <div>
           <strong>No reproducible premiums right now</strong>
-          <p>Required reference or on-chain sources failed for all 20 symbols. Retrying in {data.retryAfterSeconds} seconds.</p>
+          <p>Required reference or on-chain sources failed for all {data.entries.length} symbols. Retrying in {data.retryAfterSeconds} seconds.</p>
         </div>
         <button type="button" onClick={() => void refetch()}>Measure again</button>
       </div>

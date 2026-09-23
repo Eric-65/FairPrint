@@ -11,7 +11,7 @@ import { TRACKED_ASSETS } from "@/lib/tracked-assets";
 import type { WatchlistEntry, WatchlistResponse } from "@/lib/watchlist-types";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 function dateString(value: Date | string | null | undefined) {
   if (!value) return null;
