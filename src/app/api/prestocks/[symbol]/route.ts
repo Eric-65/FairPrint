@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLatestArchivedLiquidity } from "@/lib/archive";
+import { describeArchiveError, getLatestArchivedLiquidity } from "@/lib/archive";
 import { measureExecutionQuote } from "@/lib/depth";
 import { getCachedLiquidity } from "@/lib/liquidity";
 import { getJupiterPrice } from "@/lib/market-data";
@@ -64,10 +64,10 @@ export async function GET(
 
     const [liveDepth, archivedResult, crossCheck] = await Promise.all([
       getCachedLiquidity(asset.mint, tolerancePct),
-      getLatestArchivedLiquidity("prestocks", [asset.symbol]).catch((error: unknown) => ({
-        data: [],
-        degradedReason: error instanceof Error ? error.message : "Archive query failed",
-      })),
+      getLatestArchivedLiquidity("prestocks", [asset.symbol]).catch((error: unknown) => {
+        console.error("[FairPrint prestocks] Archive read failed", { error });
+        return { data: [], degradedReason: describeArchiveError(error) };
+      }),
       getJupiterPrice(asset.mint),
     ]);
 

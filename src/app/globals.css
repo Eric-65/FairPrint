@@ -1498,6 +1498,10 @@ p {
     text-align: right;
   }
 
+  .site-head:has(.site-head__nav) .tagline {
+    display: none;
+  }
+
   .intro {
     display: block;
     min-height: 27rem;

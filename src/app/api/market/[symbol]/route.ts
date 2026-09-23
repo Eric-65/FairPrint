@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLatestArchivedLiquidity } from "@/lib/archive";
+import { describeArchiveError, getLatestArchivedLiquidity } from "@/lib/archive";
 import { measureExecutionQuote } from "@/lib/depth";
 import { getCachedLiquidity } from "@/lib/liquidity";
 import { getTickerSnapshot } from "@/lib/market-data";
@@ -34,11 +34,10 @@ export async function GET(
     const [snapshot, liveDepth, archivedResult] = await Promise.all([
       getTickerSnapshot(tracked.symbol),
       getCachedLiquidity(tracked.mint, tolerancePct),
-      getLatestArchivedLiquidity().catch((error: unknown) => ({
-        data: [],
-        degradedReason:
-          error instanceof Error ? error.message : "Archive query failed",
-      })),
+      getLatestArchivedLiquidity().catch((error: unknown) => {
+        console.error("[FairPrint] Archive read failed", { symbol: tracked.symbol, error });
+        return { data: [], degradedReason: describeArchiveError(error) };
+      }),
     ]);
     const archived = archivedResult.data.find(
       (reading) => reading.symbol === tracked.symbol,

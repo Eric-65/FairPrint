@@ -61,7 +61,7 @@ export const dailyStats = pgTable(
   "daily_stats",
   {
     date: date("date", { mode: "string" }).notNull(),
-    symbol: varchar("symbol", { length: 16 }).notNull(),
+    symbol: varchar("symbol", { length: 32 }).notNull(),
     observationsCount: integer("observations_count").notNull(),
     premiumMean: doublePrecision("premium_mean"),
     premiumMedian: doublePrecision("premium_median"),

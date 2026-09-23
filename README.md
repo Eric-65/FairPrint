@@ -36,7 +36,7 @@ FairPrint is for non-US retail users, often trading outside US market hours, for
 - Meteora DLMM TVL and 24-hour volume as supporting pool context.
 - Estimated all-in execution cost at the entered order size.
 - Fair, caution, overpay, halted, and unavailable execution decisions.
-- A PostgreSQL archive of one observation per tracked ticker per minute, including degraded observations.
+- A PostgreSQL archive of one observation per tracked ticker per minute, including degraded observations. Route depth is probed for a rotating subset of tickers each minute (`DEPTH_SYMBOLS_PER_RUN`, default 4) so Jupiter quote traffic stays inside the free-tier limit; the watchlist shows each ticker's most recent depth reading from the last 30 minutes.
 
 ## Screenshots
 
@@ -64,8 +64,8 @@ Requirements: Node.js 22+, PostgreSQL, and npm.
 
 1. Clone the repository and run `npm install`.
 2. Copy `.env.example` to `.env` and set `DATABASE_URL` and a random `CRON_SECRET`.
-3. Apply the schema with `npx drizzle-kit push`.
-4. Start the app with `npm run dev`.
+3. Start the app with `npm run dev`. Tables are created automatically on the first archive access; `npx drizzle-kit push` is optional.
+4. Optionally set `PYTH_API_KEY` (Pyth Hermes requires a bearer token since August 2026) and `JUPITER_API_KEY` (a free key from portal.jup.ag doubles the quote budget from 30 to 60 requests per minute and moves off the deprecated keyless host).
 5. Open `http://localhost:3000`. To record a poll, call `/api/cron/observe` with `Authorization: Bearer <CRON_SECRET>`.
 
 ```bash
@@ -77,8 +77,8 @@ curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/obse
 1. Import the public GitHub repository into Vercel.
 2. Provision PostgreSQL and set `DATABASE_URL`.
 3. Set a random `CRON_SECRET`.
-4. Run `npx drizzle-kit push` against the production database once.
-5. Deploy. `vercel.json` schedules only the daily rollup at 00:15 UTC.
+4. Optionally set `PYTH_API_KEY`.
+5. Deploy. The schema is bootstrapped automatically on first use. `vercel.json` schedules only the daily rollup at 00:15 UTC.
 
 Vercel Hobby cron jobs run at most once per day, so they cannot collect one-minute observations. The free path is an external scheduler that calls the protected route every minute:
 

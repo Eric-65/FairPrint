@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLatestArchivedLiquidity } from "@/lib/archive";
+import { describeArchiveError, getLatestArchivedLiquidity } from "@/lib/archive";
 import { decideExecutionGate } from "@/lib/gate";
 import { getCachedPreStocksAssets } from "@/lib/prestocks";
 import type { PreStocksWatchlistEntry, PreStocksWatchlistResponse } from "@/lib/prestocks-types";
@@ -28,10 +28,10 @@ export async function GET() {
   const archiveResult = await getLatestArchivedLiquidity(
     "prestocks",
     assets.map((asset) => asset.symbol),
-  ).catch((error: unknown) => ({
-    data: [],
-    degradedReason: error instanceof Error ? error.message : "Archive query failed",
-  }));
+  ).catch((error: unknown) => {
+    console.error("[FairPrint prestocks] Archive read failed", { error });
+    return { data: [], degradedReason: describeArchiveError(error) };
+  });
   const liquidityBySymbol = new Map(
     archiveResult.data.map((reading) => [reading.symbol, reading]),
   );

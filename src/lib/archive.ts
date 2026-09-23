@@ -2,15 +2,23 @@ import "server-only";
 
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { ensureSchema } from "@/db/bootstrap";
 import { dailyStats, observations, type NewObservation } from "@/db/schema";
 import { getTickerSnapshots, type TickerSnapshotResult } from "./market-data";
-import { measureLiquidity } from "./liquidity";
-import { TRACKED_ASSETS, type TrackedAsset } from "./tracked-assets";
+import { measureLiquidity, type LiquidityMeasurement } from "./liquidity";
 import { getCachedPreStocksAssets, type PreStocksAsset } from "./prestocks";
+import { TRACKED_ASSETS, type TrackedAsset } from "./tracked-assets";
+
+export const ARCHIVE_NOT_CONFIGURED = "Archive is not configured";
 
 export type ObservationVenue = "xstocks" | "prestocks";
 
-export const ARCHIVE_NOT_CONFIGURED = "Archive is not configured";
+// Every run records prices for all symbols but probes route depth for only the
+// stalest few (across both venues), keeping Jupiter quote traffic inside the
+// free-tier budget. Depth readings stay valid on the watchlist for
+// DEPTH_STALE_MINUTES.
+const DEPTH_SYMBOLS_PER_RUN = Math.max(1, Number(process.env.DEPTH_SYMBOLS_PER_RUN) || 4);
+const DEPTH_STALE_MINUTES = 30;
 
 export interface ArchiveRead<T> {
   data: T;
@@ -26,12 +34,27 @@ interface ObservationRunSummary {
     symbol: string;
     premiumPct: number;
   } | null;
+  depthMeasured: string[];
   degradedReasons: Record<string, number>;
   degradedReason: string | null;
 }
 
+interface DepthTarget {
+  venue: ObservationVenue;
+  symbol: string;
+  mint: string;
+}
+
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+// Drizzle wraps driver errors as "Failed query: <sql> params: <values>", which
+// is useless to a reader; surface the driver's own message instead.
+export function describeArchiveError(error: unknown) {
+  const cause = error instanceof Error ? error.cause : undefined;
+  const detail = cause instanceof Error ? cause.message : null;
+  return detail ? `Archive query failed: ${detail}` : "Archive query failed";
 }
 
 function incrementReason(reasons: Record<string, number>, value: string | null) {
@@ -41,33 +64,55 @@ function incrementReason(reasons: Record<string, number>, value: string | null) 
   }
 }
 
-async function collectAssetObservation(
-  asset: TrackedAsset,
-  observedAt: Date,
-  snapshotResult: TickerSnapshotResult,
-): Promise<NewObservation> {
-  const [liquidityResult] = await Promise.allSettled([
-    measureLiquidity(asset.mint),
-  ]);
-  const degradedReasons: string[] = [];
+function depthKey(venue: ObservationVenue, symbol: string) {
+  return `${venue}:${symbol}`;
+}
 
-  if (snapshotResult.error) {
-    degradedReasons.push(`Fair value: ${snapshotResult.error}`);
-  }
-  if (liquidityResult.status === "rejected") {
+function liquidityFields(
+  liquidityResult: PromiseSettledResult<LiquidityMeasurement> | null,
+  context: { venue: ObservationVenue; symbol: string; mint: string },
+  degradedReasons: string[],
+) {
+  if (liquidityResult?.status === "rejected") {
     const reason = errorMessage(liquidityResult.reason, "Liquidity measurement failed");
     console.error("[FairPrint archive] Liquidity measurement failed", {
-      symbol: asset.symbol,
-      mint: asset.mint,
+      ...context,
       error: liquidityResult.reason,
     });
     degradedReasons.push(`Liquidity: ${reason}`);
   }
 
-  const snapshot = snapshotResult.snapshot;
-  const liquidity = liquidityResult.status === "fulfilled" ? liquidityResult.value : null;
-  if (snapshot?.degraded.reason) degradedReasons.push(snapshot.degraded.reason);
+  const liquidity = liquidityResult?.status === "fulfilled" ? liquidityResult.value : null;
   if (liquidity?.degradedReasons.length) degradedReasons.push(...liquidity.degradedReasons);
+
+  return {
+    routeLabel: liquidity?.routeLabel ?? null,
+    poolTvlUsd: liquidity?.poolTvlUsd ?? null,
+    poolVolume24hUsd: liquidity?.poolVolume24hUsd ?? null,
+    depth1PctUsd: liquidity?.depth1PctUsd ?? null,
+    priceImpactAt1kPct: liquidity?.priceImpactAt1kPct ?? null,
+  };
+}
+
+function collectAssetObservation(
+  asset: TrackedAsset,
+  observedAt: Date,
+  snapshotResult: TickerSnapshotResult,
+  liquidityResult: PromiseSettledResult<LiquidityMeasurement> | null,
+): NewObservation {
+  const degradedReasons: string[] = [];
+
+  if (snapshotResult.error) {
+    degradedReasons.push(`Fair value: ${snapshotResult.error}`);
+  }
+
+  const snapshot = snapshotResult.snapshot;
+  if (snapshot?.degraded.reason) degradedReasons.push(snapshot.degraded.reason);
+  const liquidity = liquidityFields(
+    liquidityResult,
+    { venue: "xstocks", symbol: asset.symbol, mint: asset.mint },
+    degradedReasons,
+  );
 
   return {
     venue: "xstocks",
@@ -82,7 +127,9 @@ async function collectAssetObservation(
         ? "issuer"
         : snapshot?.source.reference === "Pyth Hermes"
           ? "pyth"
-          : null,
+          : snapshot?.source.reference === "Jupiter stockData"
+            ? "jupiter"
+            : null,
     referencePublishedAt:
       snapshot?.freshness.referenceUpdatedAt || snapshot?.freshness.pythPublishedAt
         ? new Date(
@@ -94,36 +141,25 @@ async function collectAssetObservation(
     marketOpen: snapshot?.market.open ?? false,
     halted: snapshot?.market.halted ?? false,
     jupiterBlockId: snapshot?.source.jupiterBlockId ?? null,
-    routeLabel: liquidity?.routeLabel ?? null,
-    poolTvlUsd: liquidity?.poolTvlUsd ?? null,
-    poolVolume24hUsd: liquidity?.poolVolume24hUsd ?? null,
-    depth1PctUsd: liquidity?.depth1PctUsd ?? null,
-    priceImpactAt1kPct: liquidity?.priceImpactAt1kPct ?? null,
+    ...liquidity,
     degraded: degradedReasons.length > 0,
     degradedReason: degradedReasons.length > 0 ? degradedReasons.join("; ") : null,
   };
 }
 
-async function collectPreStocksObservation(
+function collectPreStocksObservation(
   asset: PreStocksAsset,
   observedAt: Date,
-): Promise<NewObservation> {
-  const [liquidityResult] = await Promise.allSettled([measureLiquidity(asset.mint)]);
+  liquidityResult: PromiseSettledResult<LiquidityMeasurement> | null,
+): NewObservation {
   const degradedReasons: string[] = [];
 
   if (asset.degradedReason) degradedReasons.push(asset.degradedReason);
-  if (liquidityResult.status === "rejected") {
-    const reason = errorMessage(liquidityResult.reason, "Liquidity measurement failed");
-    console.error("[FairPrint archive] PreStocks liquidity measurement failed", {
-      symbol: asset.symbol,
-      mint: asset.mint,
-      error: liquidityResult.reason,
-    });
-    degradedReasons.push(`Liquidity: ${reason}`);
-  }
-
-  const liquidity = liquidityResult.status === "fulfilled" ? liquidityResult.value : null;
-  if (liquidity?.degradedReasons.length) degradedReasons.push(...liquidity.degradedReasons);
+  const liquidity = liquidityFields(
+    liquidityResult,
+    { venue: "prestocks", symbol: asset.symbol, mint: asset.mint },
+    degradedReasons,
+  );
 
   return {
     venue: "prestocks",
@@ -140,14 +176,54 @@ async function collectPreStocksObservation(
     marketOpen: false,
     halted: false,
     jupiterBlockId: null,
-    routeLabel: liquidity?.routeLabel ?? null,
-    poolTvlUsd: liquidity?.poolTvlUsd ?? null,
-    poolVolume24hUsd: liquidity?.poolVolume24hUsd ?? null,
-    depth1PctUsd: liquidity?.depth1PctUsd ?? null,
-    priceImpactAt1kPct: liquidity?.priceImpactAt1kPct ?? null,
+    ...liquidity,
     degraded: degradedReasons.length > 0,
     degradedReason: degradedReasons.length > 0 ? degradedReasons.join("; ") : null,
   };
+}
+
+async function pickDepthTargets(
+  db: NonNullable<ReturnType<typeof getDb>>,
+  preStocksAssets: readonly PreStocksAsset[],
+): Promise<DepthTarget[]> {
+  const targets: DepthTarget[] = [
+    ...TRACKED_ASSETS.map((asset) => ({ venue: "xstocks" as const, symbol: asset.symbol, mint: asset.mint })),
+    ...preStocksAssets.map((asset) => ({ venue: "prestocks" as const, symbol: asset.symbol, mint: asset.mint })),
+  ];
+  const result = await db.execute(sql<{ venue: ObservationVenue; symbol: string; lastDepthAt: Date | null }>`
+    select venue, symbol, max(observed_at) as "lastDepthAt"
+    from ${observations}
+    where depth_1pct_usd is not null
+    group by venue, symbol
+  `);
+  const lastDepthAt = new Map(
+    (result.rows as unknown as { venue: ObservationVenue; symbol: string; lastDepthAt: Date | null }[]).map(
+      (row) => [depthKey(row.venue, row.symbol), row.lastDepthAt ? new Date(row.lastDepthAt).getTime() : 0],
+    ),
+  );
+
+  return targets
+    .sort((left, right) =>
+      (lastDepthAt.get(depthKey(left.venue, left.symbol)) ?? 0) -
+      (lastDepthAt.get(depthKey(right.venue, right.symbol)) ?? 0))
+    .slice(0, DEPTH_SYMBOLS_PER_RUN);
+}
+
+async function measureScheduledLiquidity(targets: readonly DepthTarget[]) {
+  const results = new Map<string, PromiseSettledResult<LiquidityMeasurement>>();
+  // Sequential on purpose: probes for one mint are already serial, and running
+  // mints in parallel is what tripped the Jupiter sliding-window limit.
+  for (const target of targets) {
+    const [result] = await Promise.allSettled([measureLiquidity(target.mint)]);
+    results.set(depthKey(target.venue, target.symbol), result);
+    if (result.status === "fulfilled" && result.value.rateLimited) {
+      console.warn("[FairPrint archive] Jupiter rate limit reached; deferring remaining depth probes", {
+        measured: [...results.keys()],
+      });
+      break;
+    }
+  }
+  return results;
 }
 
 export async function recordObservations(): Promise<ObservationRunSummary> {
@@ -160,15 +236,30 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
       inserted: 0,
       degraded: 0,
       widestPremium: null,
+      depthMeasured: [],
       degradedReasons: { [ARCHIVE_NOT_CONFIGURED]: 1 },
       degradedReason: ARCHIVE_NOT_CONFIGURED,
     };
   }
 
-  const snapshots = await getTickerSnapshots(TRACKED_ASSETS);
+  await ensureSchema(db);
+  const preStocksPromise = getCachedPreStocksAssets().then(
+    (assets) => ({ assets, error: null as string | null }),
+    (error: unknown) => {
+      console.error("[FairPrint archive] PreStocks fetch failed", { error });
+      return { assets: [] as PreStocksAsset[], error: errorMessage(error, "PreStocks fetch failed") };
+    },
+  );
+  const [snapshots, preStocks, liquidityByKey] = await Promise.all([
+    getTickerSnapshots(TRACKED_ASSETS),
+    preStocksPromise,
+    preStocksPromise
+      .then(({ assets }) => pickDepthTargets(db, assets))
+      .then(measureScheduledLiquidity),
+  ]);
   const snapshotsBySymbol = new Map(snapshots.map((result) => [result.symbol, result]));
-  const xstocksRows = await Promise.all(
-    TRACKED_ASSETS.map((asset) =>
+  const rows = [
+    ...TRACKED_ASSETS.map((asset) =>
       collectAssetObservation(
         asset,
         observedAt,
@@ -177,22 +268,18 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
           snapshot: null,
           error: "Ticker was omitted from the batch result",
         },
+        liquidityByKey.get(depthKey("xstocks", asset.symbol)) ?? null,
       ),
     ),
-  );
+    ...preStocks.assets.map((asset) =>
+      collectPreStocksObservation(
+        asset,
+        observedAt,
+        liquidityByKey.get(depthKey("prestocks", asset.symbol)) ?? null,
+      ),
+    ),
+  ];
 
-  const preStocksAssetsResult = await getCachedPreStocksAssets().then(
-    (assets) => ({ assets, error: null as string | null }),
-    (error: unknown) => {
-      console.error("[FairPrint archive] PreStocks fetch failed", { error });
-      return { assets: [] as PreStocksAsset[], error: errorMessage(error, "PreStocks fetch failed") };
-    },
-  );
-  const preStocksRows = await Promise.all(
-    preStocksAssetsResult.assets.map((asset) => collectPreStocksObservation(asset, observedAt)),
-  );
-
-  const rows = [...xstocksRows, ...preStocksRows];
   const inserted = await db
     .insert(observations)
     .values(rows)
@@ -214,16 +301,19 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
       widestPremium = { symbol: row.symbol, premiumPct: row.premiumPct };
     }
   }
-  if (preStocksAssetsResult.error) {
-    incrementReason(degradedReasons, `PreStocks: ${preStocksAssetsResult.error}`);
+  if (preStocks.error) {
+    incrementReason(degradedReasons, `PreStocks: ${preStocks.error}`);
   }
 
   return {
     observedAt: observedAt.toISOString(),
-    attempted: TRACKED_ASSETS.length + preStocksAssetsResult.assets.length,
+    attempted: rows.length,
     inserted: inserted.length,
     degraded: inserted.filter((row) => row.degraded).length,
     widestPremium,
+    depthMeasured: rows
+      .filter((row) => row.depth1PctUsd !== null && row.depth1PctUsd !== undefined)
+      .map((row) => row.symbol),
     degradedReasons,
     degradedReason: null,
   };
@@ -247,10 +337,6 @@ export interface WidestGap {
   observedAt: Date;
 }
 
-function trackedSymbolSql() {
-  return sql.join(TRACKED_ASSETS.map((asset) => sql`${asset.symbol}`), sql`, `);
-}
-
 function symbolListSql(symbols: readonly string[]) {
   return sql.join(symbols.map((symbol) => sql`${symbol}`), sql`, `);
 }
@@ -267,8 +353,11 @@ export async function getLatestArchivedLiquidity(
     return { data: [], degradedReason: null };
   }
 
-  const result = await db.execute(sql<ArchivedLiquidity>`
-    select distinct on (symbol)
+  await ensureSchema(db);
+  // Depth is probed on a rotation, so the newest row for a symbol usually has
+  // no depth. Prefer the most recent measured reading inside the freshness
+  // window and fall back to the newest row so its degraded reason surfaces.
+  const columns = sql`
       symbol,
       depth_1pct_usd as "depth1PctUsd",
       price_impact_at_1k_pct as "priceImpactAt1kPct",
@@ -277,14 +366,34 @@ export async function getLatestArchivedLiquidity(
       pool_volume_24h_usd as "poolVolume24hUsd",
       observed_at as "observedAt",
       degraded,
-      degraded_reason as "degradedReason"
-    from ${observations}
-    where venue = ${venue} and symbol in (${symbolListSql(symbols)})
-    order by symbol, observed_at desc
-  `);
+      degraded_reason as "degradedReason"`;
+  const [measured, latest] = await Promise.all([
+    db.execute(sql<ArchivedLiquidity>`
+      select distinct on (symbol) ${columns}
+      from ${observations}
+      where venue = ${venue}
+        and symbol in (${symbolListSql(symbols)})
+        and depth_1pct_usd is not null
+        and observed_at >= now() - make_interval(mins => ${DEPTH_STALE_MINUTES})
+      order by symbol, observed_at desc
+    `),
+    db.execute(sql<ArchivedLiquidity>`
+      select distinct on (symbol) ${columns}
+      from ${observations}
+      where venue = ${venue}
+        and symbol in (${symbolListSql(symbols)})
+      order by symbol, observed_at desc
+    `),
+  ]);
+  const bySymbol = new Map(
+    (latest.rows as unknown as ArchivedLiquidity[]).map((row) => [row.symbol, row]),
+  );
+  for (const row of measured.rows as unknown as ArchivedLiquidity[]) {
+    bySymbol.set(row.symbol, row);
+  }
 
   return {
-    data: result.rows as unknown as ArchivedLiquidity[],
+    data: [...bySymbol.values()],
     degradedReason: null,
   };
 }
@@ -295,11 +404,13 @@ export async function getWidestGap24h(): Promise<ArchiveRead<WidestGap | null>> 
     return { data: null, degradedReason: ARCHIVE_NOT_CONFIGURED };
   }
 
+  await ensureSchema(db);
   const result = await db.execute(sql<WidestGap>`
     select symbol, premium_pct as "premiumPct", observed_at as "observedAt"
     from ${observations}
     where observed_at >= now() - interval '24 hours'
-      and symbol in (${trackedSymbolSql()})
+      and venue = 'xstocks'
+      and symbol in (${symbolListSql(TRACKED_ASSETS.map((asset) => asset.symbol))})
       and premium_pct is not null
     order by abs(premium_pct) desc
     limit 1
@@ -326,6 +437,7 @@ export async function rollupDailyStats(date?: string) {
     };
   }
 
+  await ensureSchema(db);
   const result = await db.execute(sql`
     insert into ${dailyStats} (
       date,
