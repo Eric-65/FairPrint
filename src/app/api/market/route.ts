@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  describeArchiveError,
   getLatestArchivedLiquidity,
   getWidestGap24h,
   type ArchivedLiquidity,
@@ -29,7 +30,7 @@ export async function GET() {
         error: liquidity.degradedReason ?? widest.degradedReason,
       }),
       (error: unknown) => {
-        const message = error instanceof Error ? error.message : "Archive query failed";
+        const message = describeArchiveError(error);
         console.error("[FairPrint watchlist] Archive read failed", { error });
         return {
           liquidity: [] as ArchivedLiquidity[],

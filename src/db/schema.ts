@@ -19,7 +19,8 @@ export const observations = pgTable(
   "observations",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    symbol: varchar("symbol", { length: 16 }).notNull(),
+    venue: varchar("venue", { length: 16 }).notNull().default("xstocks"),
+    symbol: varchar("symbol", { length: 32 }).notNull(),
     mint: varchar("mint", { length: 64 }).notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true, mode: "date" })
       .defaultNow()
@@ -42,12 +43,18 @@ export const observations = pgTable(
     poolVolume24hUsd: doublePrecision("pool_volume_24h_usd"),
     depth1PctUsd: doublePrecision("depth_1pct_usd"),
     priceImpactAt1kPct: doublePrecision("price_impact_at_1k_pct"),
+    depthProbed: boolean("depth_probed").notNull().default(false),
     degraded: boolean("degraded").notNull().default(false),
     degradedReason: text("degraded_reason"),
   },
   (table) => [
     index("observations_observed_at_idx").on(table.observedAt),
     index("observations_symbol_observed_at_idx").on(table.symbol, table.observedAt),
+    index("observations_venue_symbol_observed_at_idx").on(
+      table.venue,
+      table.symbol,
+      table.observedAt,
+    ),
   ],
 );
 
@@ -55,7 +62,7 @@ export const dailyStats = pgTable(
   "daily_stats",
   {
     date: date("date", { mode: "string" }).notNull(),
-    symbol: varchar("symbol", { length: 16 }).notNull(),
+    symbol: varchar("symbol", { length: 32 }).notNull(),
     observationsCount: integer("observations_count").notNull(),
     premiumMean: doublePrecision("premium_mean"),
     premiumMedian: doublePrecision("premium_median"),

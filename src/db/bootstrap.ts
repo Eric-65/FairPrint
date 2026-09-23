@@ -9,7 +9,7 @@ import type { FairPrintDb } from "./index";
 const BOOTSTRAP_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS "daily_stats" (
     "date" date NOT NULL,
-    "symbol" varchar(16) NOT NULL,
+    "symbol" varchar(32) NOT NULL,
     "observations_count" integer NOT NULL,
     "premium_mean" double precision,
     "premium_median" double precision,
@@ -26,7 +26,8 @@ const BOOTSTRAP_STATEMENTS = [
   )`,
   `CREATE TABLE IF NOT EXISTS "observations" (
     "id" bigserial PRIMARY KEY NOT NULL,
-    "symbol" varchar(16) NOT NULL,
+    "venue" varchar(16) DEFAULT 'xstocks' NOT NULL,
+    "symbol" varchar(32) NOT NULL,
     "mint" varchar(64) NOT NULL,
     "observed_at" timestamp with time zone DEFAULT now() NOT NULL,
     "onchain_price" double precision,
@@ -44,12 +45,47 @@ const BOOTSTRAP_STATEMENTS = [
     "pool_volume_24h_usd" double precision,
     "depth_1pct_usd" double precision,
     "price_impact_at_1k_pct" double precision,
+    "depth_probed" boolean DEFAULT false NOT NULL,
     "degraded" boolean DEFAULT false NOT NULL,
     "degraded_reason" text
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "daily_stats_date_symbol_idx" ON "daily_stats" USING btree ("date","symbol")`,
   `CREATE INDEX IF NOT EXISTS "observations_observed_at_idx" ON "observations" USING btree ("observed_at")`,
   `CREATE INDEX IF NOT EXISTS "observations_symbol_observed_at_idx" ON "observations" USING btree ("symbol","observed_at")`,
+  // Upgrades for databases created before the PreStocks venue existed. Guarded
+  // by catalog checks so a warm database never takes an ALTER TABLE lock.
+  `DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'observations' AND column_name = 'venue'
+    ) THEN
+      ALTER TABLE "observations" ADD COLUMN "venue" varchar(16) DEFAULT 'xstocks' NOT NULL;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'observations' AND column_name = 'depth_probed'
+    ) THEN
+      ALTER TABLE "observations" ADD COLUMN "depth_probed" boolean DEFAULT false NOT NULL;
+      -- Rows written before this column existed only record successes.
+      UPDATE "observations" SET "depth_probed" = true WHERE "depth_1pct_usd" IS NOT NULL;
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'observations'
+        AND column_name = 'symbol' AND character_maximum_length < 32
+    ) THEN
+      ALTER TABLE "observations" ALTER COLUMN "symbol" TYPE varchar(32);
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'daily_stats'
+        AND column_name = 'symbol' AND character_maximum_length < 32
+    ) THEN
+      ALTER TABLE "daily_stats" ALTER COLUMN "symbol" TYPE varchar(32);
+    END IF;
+  END $$`,
+  `CREATE INDEX IF NOT EXISTS "observations_venue_symbol_observed_at_idx" ON "observations" USING btree ("venue","symbol","observed_at")`,
 ];
 
 declare global {
