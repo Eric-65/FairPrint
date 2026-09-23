@@ -13,8 +13,8 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
-// Capacity note: 20 symbols × 1,440 minute polls/day × 90 raw days
-// yields approximately 2,592,000 observations before hourly thinning.
+// Capacity note: ~40 symbols (xStocks + PreStocks) × 1,440 minute polls/day
+// × 90 raw days yields approximately 5,184,000 observations before hourly thinning.
 export const observations = pgTable(
   "observations",
   {

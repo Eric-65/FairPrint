@@ -441,6 +441,42 @@ export async function getJupiterPrice(mint: string): Promise<JupiterPriceCheck> 
   };
 }
 
+// Mint addresses never change for a symbol, so a successful lookup is kept for
+// the life of the process; failures are dropped so the next call retries.
+const xStockMintCache = new Map<string, Promise<string>>();
+
+export function resolveXStockMint(symbol: string): Promise<string> {
+  const cached = xStockMintCache.get(symbol);
+  if (cached) return cached;
+
+  const mint = fetchJson<XStocksAsset>(
+    `${XSTOCKS_BASE_URL}/public/assets/${encodeURIComponent(symbol)}`,
+  ).then((asset) => {
+    const solana = asset.deployments.find((deployment) => deployment.network === "Solana");
+    if (!solana) throw new Error(`${symbol} has no verified Solana deployment`);
+    return solana.address;
+  });
+  mint.catch(() => xStockMintCache.delete(symbol));
+  xStockMintCache.set(symbol, mint);
+  return mint;
+}
+
+export async function withResolvedMints<T extends { symbol: string; mint: string | null }>(
+  assets: readonly T[],
+): Promise<T[]> {
+  return Promise.all(
+    assets.map(async (asset) => {
+      if (asset.mint) return asset;
+      try {
+        return { ...asset, mint: await resolveXStockMint(asset.symbol) };
+      } catch (error) {
+        console.error("[FairPrint] xStocks mint lookup failed", { symbol: asset.symbol, error });
+        return asset;
+      }
+    }),
+  );
+}
+
 export interface TickerSnapshotResult {
   symbol: string;
   snapshot: TickerSnapshot | null;
@@ -448,9 +484,12 @@ export interface TickerSnapshotResult {
 }
 
 export async function getTickerSnapshots(
-  assets: readonly { symbol: string; mint: string }[],
+  unresolvedAssets: readonly { symbol: string; mint: string | null }[],
 ): Promise<TickerSnapshotResult[]> {
-  const jupiter = await fetchJupiterPrices(assets.map((asset) => asset.mint));
+  const assets = await withResolvedMints(unresolvedAssets);
+  const jupiter = await fetchJupiterPrices(
+    assets.flatMap((asset) => (asset.mint ? [asset.mint] : [])),
+  );
 
   return Promise.all(
     assets.map(async (asset, index) => {

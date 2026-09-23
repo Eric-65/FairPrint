@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AnimatedHero } from "@/components/animated-hero";
 import { Watchlist } from "@/components/ticker-row";
+import { TRACKED_ASSETS } from "@/lib/tracked-assets";
 
 export default function HomePage() {
   return (
@@ -32,7 +33,7 @@ export default function HomePage() {
         <section className="watchlist" aria-labelledby="watchlist-title">
           <div className="section-rule">
             <h2 id="watchlist-title">Mispricing watch</h2>
-            <p>Twenty verified Solana deployments, refreshed every 15 seconds</p>
+            <p>{TRACKED_ASSETS.length} xStocks on Solana, refreshed every 15 seconds</p>
           </div>
           <Watchlist />
         </section>

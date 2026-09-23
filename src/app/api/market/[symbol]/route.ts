@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { describeArchiveError, getLatestArchivedLiquidity } from "@/lib/archive";
 import { measureExecutionQuote } from "@/lib/depth";
 import { getCachedLiquidity } from "@/lib/liquidity";
-import { getTickerSnapshot } from "@/lib/market-data";
+import { getTickerSnapshot, resolveXStockMint } from "@/lib/market-data";
 import { findTrackedAsset } from "@/lib/tracked-assets";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function GET(
     return NextResponse.json(
       {
         error: "Ticker is not in the FairPrint watchlist",
-        action: "Choose one of the 20 tracked xStocks from the mispricing watch.",
+        action: "Choose one of the tracked xStocks from the mispricing watch.",
       },
       { status: 404 },
     );
@@ -31,9 +31,10 @@ export async function GET(
     const requestedTolerance = Number(url.searchParams.get("slippage") ?? 1);
     const notionalUsd = Math.min(100_000, Math.max(100, requestedNotional || 1_000));
     const tolerancePct = Math.min(5, Math.max(0.1, requestedTolerance || 1));
+    const mint = tracked.mint ?? await resolveXStockMint(tracked.symbol);
     const [snapshot, liveDepth, archivedResult] = await Promise.all([
       getTickerSnapshot(tracked.symbol),
-      getCachedLiquidity(tracked.mint, tolerancePct),
+      getCachedLiquidity(mint, tolerancePct),
       getLatestArchivedLiquidity().catch((error: unknown) => {
         console.error("[FairPrint] Archive read failed", { symbol: tracked.symbol, error });
         return { data: [], degradedReason: describeArchiveError(error) };
@@ -65,7 +66,7 @@ export async function GET(
     const executionResult = snapshot.source.tokenDecimals === null
       ? { quote: null, error: "Jupiter did not publish token decimals for cost calculation" }
       : await measureExecutionQuote(
-          tracked.mint,
+          mint,
           notionalUsd,
           tolerancePct,
           snapshot.source.tokenDecimals,
