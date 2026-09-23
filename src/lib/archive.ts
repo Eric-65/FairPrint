@@ -6,6 +6,9 @@ import { dailyStats, observations, type NewObservation } from "@/db/schema";
 import { getTickerSnapshots, type TickerSnapshotResult } from "./market-data";
 import { measureLiquidity } from "./liquidity";
 import { TRACKED_ASSETS, type TrackedAsset } from "./tracked-assets";
+import { getCachedPreStocksAssets, type PreStocksAsset } from "./prestocks";
+
+export type ObservationVenue = "xstocks" | "prestocks";
 
 export const ARCHIVE_NOT_CONFIGURED = "Archive is not configured";
 
@@ -67,6 +70,7 @@ async function collectAssetObservation(
   if (liquidity?.degradedReasons.length) degradedReasons.push(...liquidity.degradedReasons);
 
   return {
+    venue: "xstocks",
     symbol: asset.symbol,
     mint: snapshot?.mint ?? asset.mint,
     observedAt,
@@ -100,6 +104,52 @@ async function collectAssetObservation(
   };
 }
 
+async function collectPreStocksObservation(
+  asset: PreStocksAsset,
+  observedAt: Date,
+): Promise<NewObservation> {
+  const [liquidityResult] = await Promise.allSettled([measureLiquidity(asset.mint)]);
+  const degradedReasons: string[] = [];
+
+  if (asset.degradedReason) degradedReasons.push(asset.degradedReason);
+  if (liquidityResult.status === "rejected") {
+    const reason = errorMessage(liquidityResult.reason, "Liquidity measurement failed");
+    console.error("[FairPrint archive] PreStocks liquidity measurement failed", {
+      symbol: asset.symbol,
+      mint: asset.mint,
+      error: liquidityResult.reason,
+    });
+    degradedReasons.push(`Liquidity: ${reason}`);
+  }
+
+  const liquidity = liquidityResult.status === "fulfilled" ? liquidityResult.value : null;
+  if (liquidity?.degradedReasons.length) degradedReasons.push(...liquidity.degradedReasons);
+
+  return {
+    venue: "prestocks",
+    symbol: asset.symbol,
+    mint: asset.mint,
+    observedAt,
+    onchainPrice: asset.tokenPrice,
+    referencePrice: asset.markPrice,
+    premiumPct: asset.premiumPct,
+    referenceSource: "prestocks",
+    referencePublishedAt: null,
+    confidenceInterval: null,
+    marketPeriod: null,
+    marketOpen: false,
+    halted: false,
+    jupiterBlockId: null,
+    routeLabel: liquidity?.routeLabel ?? null,
+    poolTvlUsd: liquidity?.poolTvlUsd ?? null,
+    poolVolume24hUsd: liquidity?.poolVolume24hUsd ?? null,
+    depth1PctUsd: liquidity?.depth1PctUsd ?? null,
+    priceImpactAt1kPct: liquidity?.priceImpactAt1kPct ?? null,
+    degraded: degradedReasons.length > 0,
+    degradedReason: degradedReasons.length > 0 ? degradedReasons.join("; ") : null,
+  };
+}
+
 export async function recordObservations(): Promise<ObservationRunSummary> {
   const observedAt = new Date();
   const db = getDb();
@@ -117,7 +167,7 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
 
   const snapshots = await getTickerSnapshots(TRACKED_ASSETS);
   const snapshotsBySymbol = new Map(snapshots.map((result) => [result.symbol, result]));
-  const rows = await Promise.all(
+  const xstocksRows = await Promise.all(
     TRACKED_ASSETS.map((asset) =>
       collectAssetObservation(
         asset,
@@ -131,6 +181,18 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
     ),
   );
 
+  const preStocksAssetsResult = await getCachedPreStocksAssets().then(
+    (assets) => ({ assets, error: null as string | null }),
+    (error: unknown) => {
+      console.error("[FairPrint archive] PreStocks fetch failed", { error });
+      return { assets: [] as PreStocksAsset[], error: errorMessage(error, "PreStocks fetch failed") };
+    },
+  );
+  const preStocksRows = await Promise.all(
+    preStocksAssetsResult.assets.map((asset) => collectPreStocksObservation(asset, observedAt)),
+  );
+
+  const rows = [...xstocksRows, ...preStocksRows];
   const inserted = await db
     .insert(observations)
     .values(rows)
@@ -152,10 +214,13 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
       widestPremium = { symbol: row.symbol, premiumPct: row.premiumPct };
     }
   }
+  if (preStocksAssetsResult.error) {
+    incrementReason(degradedReasons, `PreStocks: ${preStocksAssetsResult.error}`);
+  }
 
   return {
     observedAt: observedAt.toISOString(),
-    attempted: TRACKED_ASSETS.length,
+    attempted: TRACKED_ASSETS.length + preStocksAssetsResult.assets.length,
     inserted: inserted.length,
     degraded: inserted.filter((row) => row.degraded).length,
     widestPremium,
@@ -186,12 +251,20 @@ function trackedSymbolSql() {
   return sql.join(TRACKED_ASSETS.map((asset) => sql`${asset.symbol}`), sql`, `);
 }
 
-export async function getLatestArchivedLiquidity(): Promise<
-  ArchiveRead<ArchivedLiquidity[]>
-> {
+function symbolListSql(symbols: readonly string[]) {
+  return sql.join(symbols.map((symbol) => sql`${symbol}`), sql`, `);
+}
+
+export async function getLatestArchivedLiquidity(
+  venue: ObservationVenue = "xstocks",
+  symbols: readonly string[] = TRACKED_ASSETS.map((asset) => asset.symbol),
+): Promise<ArchiveRead<ArchivedLiquidity[]>> {
   const db = getDb();
   if (!db) {
     return { data: [], degradedReason: ARCHIVE_NOT_CONFIGURED };
+  }
+  if (symbols.length === 0) {
+    return { data: [], degradedReason: null };
   }
 
   const result = await db.execute(sql<ArchivedLiquidity>`
@@ -206,7 +279,7 @@ export async function getLatestArchivedLiquidity(): Promise<
       degraded,
       degraded_reason as "degradedReason"
     from ${observations}
-    where symbol in (${trackedSymbolSql()})
+    where venue = ${venue} and symbol in (${symbolListSql(symbols)})
     order by symbol, observed_at desc
   `);
 

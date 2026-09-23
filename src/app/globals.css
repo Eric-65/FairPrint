@@ -215,6 +215,25 @@ p {
   text-wrap: balance;
 }
 
+.site-head__nav {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.site-head__nav a {
+  color: var(--muted-color);
+  font-size: 0.8125rem;
+  font-weight: 620;
+  text-decoration: none;
+}
+
+.site-head__nav a:hover,
+.site-head__nav a[aria-current="page"] {
+  color: var(--text-color);
+}
+
 .intro {
   grid-column: 1 / -1;
   display: grid;

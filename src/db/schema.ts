@@ -19,7 +19,8 @@ export const observations = pgTable(
   "observations",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    symbol: varchar("symbol", { length: 16 }).notNull(),
+    venue: varchar("venue", { length: 16 }).notNull().default("xstocks"),
+    symbol: varchar("symbol", { length: 32 }).notNull(),
     mint: varchar("mint", { length: 64 }).notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true, mode: "date" })
       .defaultNow()
@@ -48,6 +49,11 @@ export const observations = pgTable(
   (table) => [
     index("observations_observed_at_idx").on(table.observedAt),
     index("observations_symbol_observed_at_idx").on(table.symbol, table.observedAt),
+    index("observations_venue_symbol_observed_at_idx").on(
+      table.venue,
+      table.symbol,
+      table.observedAt,
+    ),
   ],
 );
 

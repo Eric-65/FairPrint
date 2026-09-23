@@ -383,6 +383,24 @@ export async function getTickerSnapshot(
   };
 }
 
+export interface JupiterPriceCheck {
+  price: number | null;
+  blockId: number | null;
+  decimals: number | null;
+  error: string | null;
+}
+
+export async function getJupiterPrice(mint: string): Promise<JupiterPriceCheck> {
+  const result = await fetchJupiterPrices([mint]);
+  const entry = result.value[mint];
+  return {
+    price: finiteNumber(entry?.usdPrice),
+    blockId: entry?.blockId ?? null,
+    decimals: entry?.decimals ?? null,
+    error: result.error,
+  };
+}
+
 export interface TickerSnapshotResult {
   symbol: string;
   snapshot: TickerSnapshot | null;
