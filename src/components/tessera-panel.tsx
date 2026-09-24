@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { PremiumHistory } from "@/components/premium-history";
 import { decideExecutionGate } from "@/lib/gate";
+import type { RouteTrackRecord } from "@/lib/archive";
 import type { TesseraSnapshot } from "@/lib/tessera";
 
 interface DepthMeasurement {
@@ -48,6 +49,7 @@ interface DetailResponse {
   cost: CostMeasurement | null;
   costDegradedReason: string | null;
   comparisonDepth1PctUsd: number | null;
+  trackRecord: RouteTrackRecord | null;
   notionalUsd: number;
   tolerancePct: number;
   measuredAt: string;
@@ -111,8 +113,9 @@ function signedDollars(value: number) {
   return `${value < 0 ? "−" : ""}$${absolute}`;
 }
 
-function CheapestRoute({ snapshot, comparisonDepth, tesseraDepth, notional }: {
+function CheapestRoute({ snapshot, trackRecord, comparisonDepth, tesseraDepth, notional }: {
   snapshot: TesseraSnapshot;
+  trackRecord: RouteTrackRecord | null;
   comparisonDepth: number | null;
   tesseraDepth: number | null;
   notional: number;
@@ -147,6 +150,11 @@ function CheapestRoute({ snapshot, comparisonDepth, tesseraDepth, notional }: {
     <section className="cheapest-route" aria-labelledby="tessera-route-title" data-winner={tesseraCheaper ? "tessera" : "other"}>
       <h2 id="tessera-route-title">Cheapest route to {token.company}</h2>
       <p className="cheapest-route__verdict">{verdict}{sizeCaveat}</p>
+      <p className="cheapest-route__track">
+        {trackRecord && trackRecord.readings > 0
+          ? `Over the last 7 days of archived minute readings (since ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(trackRecord.firstObservedAt))}), ${token.symbol} was the cheaper route in ${Math.round(trackRecord.pctTesseraCheaper)}% of ${trackRecord.readings.toLocaleString("en-US")} readings, ${trackRecord.discountMaxPct - trackRecord.discountMinPct < 0.1 ? `consistently ${trackRecord.discountMeanPct.toFixed(1)}%` : `ranging from ${trackRecord.discountMinPct.toFixed(1)}% to ${trackRecord.discountMaxPct.toFixed(1)}%`} below PreStocks.`
+          : "The track record starts with the next archived minute reading."}
+      </p>
       <div className="cheapest-route__venues">
         <div data-lead={tesseraCheaper}>
           <span>{token.symbol} · Tessera{tesseraCheaper ? " · cheaper route" : ""}</span>
@@ -253,6 +261,14 @@ export function TesseraPanel({ symbol }: { symbol: string }) {
         <span><i data-active={isFetching} />{isFetching ? "Remeasuring" : "Tessera · private company, no market hours"}</span>
       </header>
 
+      <CheapestRoute
+        snapshot={snapshot}
+        trackRecord={data.trackRecord}
+        comparisonDepth={data.comparisonDepth1PctUsd}
+        tesseraDepth={depth.depth1PctUsd}
+        notional={notional}
+      />
+
       <div className="trade-verdict">
         <p id="tessera-trade-symbol">{token.symbol} execution check</p>
         {snapshot.premiumPct === null ? (
@@ -285,13 +301,6 @@ export function TesseraPanel({ symbol }: { symbol: string }) {
           </small>
         </div>
       </div>
-
-      <CheapestRoute
-        snapshot={snapshot}
-        comparisonDepth={data.comparisonDepth1PctUsd}
-        tesseraDepth={depth.depth1PctUsd}
-        notional={notional}
-      />
 
       <PremiumHistory venue="tessera" symbol={token.symbol} markLabel="Tessera mark" />
 
@@ -389,6 +398,12 @@ export function TesseraPanel({ symbol }: { symbol: string }) {
           <span>FairPrint gate</span>
           <strong>{decision.gate}</strong>
           <p>{decision.reason}</p>
+          {decision.gate === "overpay" && discount !== null && discount > 0.05 && snapshot.comparison ? (
+            <p>
+              Measured against Tessera&apos;s own mark. It is still the cheapest on-chain route to {token.company}:{" "}
+              {discount.toFixed(1)}% below PreStocks&apos; {snapshot.comparison.prestocks.symbol}.
+            </p>
+          ) : null}
         </div>
 
         {decision.gate === "overpay" ? (

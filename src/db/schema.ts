@@ -44,6 +44,11 @@ export const observations = pgTable(
     depth1PctUsd: doublePrecision("depth_1pct_usd"),
     priceImpactAt1kPct: doublePrecision("price_impact_at_1k_pct"),
     depthProbed: boolean("depth_probed").notNull().default(false),
+    // Company valuation implied by this row's live price, and the same figure
+    // for the matched token on another venue (Tessera rows only).
+    impliedValuation: doublePrecision("implied_valuation"),
+    compareSymbol: varchar("compare_symbol", { length: 32 }),
+    compareImpliedValuation: doublePrecision("compare_implied_valuation"),
     degraded: boolean("degraded").notNull().default(false),
     degradedReason: text("degraded_reason"),
   },

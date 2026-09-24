@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   title: "Tessera T-Token watch — FairPrint",
   description:
     "Live premium, executable depth, and the cheapest route to OpenAI, Kalshi, and SpaceX exposure for Tessera T-Tokens on Solana.",
+  twitter: { card: "summary_large_image" },
 };
 
 export default function TesseraPage() {
@@ -37,7 +38,7 @@ export default function TesseraPage() {
         <section className="watchlist" aria-labelledby="tessera-watchlist-title">
           <div className="section-rule">
             <h2 id="tessera-watchlist-title">Tessera T-Token watch</h2>
-            <p>OpenAI, Kalshi, and every other T-Token Tessera lists, refreshed every 15 seconds</p>
+            <p>OpenAI, Kalshi, SpaceX, and every other T-Token Tessera lists, refreshed every 15 seconds</p>
           </div>
           <TesseraWatchlist />
         </section>
