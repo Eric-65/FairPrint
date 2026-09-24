@@ -46,6 +46,9 @@ const BOOTSTRAP_STATEMENTS = [
     "depth_1pct_usd" double precision,
     "price_impact_at_1k_pct" double precision,
     "depth_probed" boolean DEFAULT false NOT NULL,
+    "implied_valuation" double precision,
+    "compare_symbol" varchar(32),
+    "compare_implied_valuation" double precision,
     "degraded" boolean DEFAULT false NOT NULL,
     "degraded_reason" text
   )`,
@@ -69,6 +72,15 @@ const BOOTSTRAP_STATEMENTS = [
       ALTER TABLE "observations" ADD COLUMN "depth_probed" boolean DEFAULT false NOT NULL;
       -- Rows written before this column existed only record successes.
       UPDATE "observations" SET "depth_probed" = true WHERE "depth_1pct_usd" IS NOT NULL;
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'observations' AND column_name = 'implied_valuation'
+    ) THEN
+      ALTER TABLE "observations"
+        ADD COLUMN "implied_valuation" double precision,
+        ADD COLUMN "compare_symbol" varchar(32),
+        ADD COLUMN "compare_implied_valuation" double precision;
     END IF;
     IF EXISTS (
       SELECT 1 FROM information_schema.columns

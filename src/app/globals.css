@@ -1033,6 +1033,141 @@ p {
   font-size: 0.6875rem;
 }
 
+.route-hero {
+  display: grid;
+  gap: 1rem;
+  padding-block: 1.5rem 2rem;
+  transition: opacity 200ms linear;
+}
+
+.route-hero[data-refreshing="true"] {
+  opacity: 0.85;
+}
+
+.route-hero__eyebrow {
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+  font-weight: 620;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.route-hero h2 {
+  max-width: 22ch;
+  font-size: clamp(1.75rem, 5vw, 3rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+.route-hero__lede {
+  max-width: 60ch;
+  color: var(--muted-color);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.route-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.route-card {
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+  padding: 1rem;
+  border: 1px solid var(--rule-color);
+  border-top: 4px solid var(--strong-rule);
+  background: var(--panel-color);
+  color: var(--text-color);
+  text-decoration: none;
+}
+
+.route-card[data-cheaper="true"] {
+  border-top-color: var(--fair);
+}
+
+.route-card:hover,
+.route-card:focus-visible {
+  border-color: var(--strong-rule);
+}
+
+.route-card:focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+.route-card__company {
+  font-size: 0.9375rem;
+  font-weight: 760;
+}
+
+.route-card__figure {
+  font-size: 2rem;
+  font-weight: 820;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.route-card[data-cheaper="true"] .route-card__figure {
+  color: color-mix(in oklch, var(--fair) 80%, var(--text-color));
+}
+
+.route-card__label,
+.route-card small {
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+.route-card dl {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.5rem 0 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--rule-color);
+}
+
+.route-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.75rem;
+}
+
+.route-card dt {
+  color: var(--muted-color);
+}
+
+.route-card dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-card__cta {
+  margin-top: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--fair);
+  text-underline-offset: 0.22em;
+}
+
+.route-hero__rows-title h3 {
+  font-size: 1rem;
+  font-weight: 760;
+}
+
+.cheapest-route__track {
+  color: var(--muted-color);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
 .cheapest-route {
   display: grid;
   gap: 0.8rem;

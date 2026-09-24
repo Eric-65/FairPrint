@@ -218,6 +218,9 @@ function collectTesseraObservation(
     marketOpen: false,
     halted: false,
     jupiterBlockId: snapshot.jupiterBlockId,
+    impliedValuation: snapshot.impliedValuation,
+    compareSymbol: snapshot.comparison?.prestocks.symbol ?? null,
+    compareImpliedValuation: snapshot.comparison?.prestocks.impliedValuation ?? null,
     ...liquidity,
     degraded: degradedReasons.length > 0,
     degradedReason: degradedReasons.length > 0 ? degradedReasons.join("; ") : null,
@@ -594,6 +597,65 @@ export async function getPremiumHistory(
           }
         : null,
     },
+    degradedReason: null,
+  };
+}
+
+export interface RouteTrackRecord {
+  symbol: string;
+  compareSymbol: string;
+  readings: number;
+  // Share of paired readings where the T-Token implied the lower valuation.
+  pctTesseraCheaper: number;
+  discountMeanPct: number;
+  discountMinPct: number;
+  discountMaxPct: number;
+  firstObservedAt: string;
+}
+
+// The Tessera discount at each minute: how much lower the company valuation
+// implied by the T-Token was than the one implied by the matched token.
+export async function getRouteTrackRecords(
+  window: HistoryRange = "7d",
+): Promise<ArchiveRead<RouteTrackRecord[]>> {
+  const db = getDb();
+  if (!db) return { data: [], degradedReason: ARCHIVE_NOT_CONFIGURED };
+
+  await ensureSchema(db);
+  const since = new Date(Date.now() - HISTORY_RANGES[window].spanMs);
+  const result = await db.execute(sql`
+    select
+      symbol,
+      compare_symbol as "compareSymbol",
+      count(*)::integer as readings,
+      100.0 * count(*) filter (where implied_valuation < compare_implied_valuation) / count(*) as "pctTesseraCheaper",
+      avg(discount) as "discountMeanPct",
+      min(discount) as "discountMinPct",
+      max(discount) as "discountMaxPct",
+      min(observed_at) as "firstObservedAt"
+    from (
+      select symbol, compare_symbol, implied_valuation, compare_implied_valuation, observed_at,
+        100.0 * (compare_implied_valuation - implied_valuation) / compare_implied_valuation as discount
+      from ${observations}
+      where venue = 'tessera'
+        and observed_at >= ${since}
+        and implied_valuation is not null
+        and compare_implied_valuation > 0
+    ) paired
+    group by symbol, compare_symbol
+  `);
+
+  return {
+    data: (result.rows as Record<string, unknown>[]).map((row) => ({
+      symbol: String(row.symbol),
+      compareSymbol: String(row.compareSymbol),
+      readings: Number(row.readings),
+      pctTesseraCheaper: Number(row.pctTesseraCheaper),
+      discountMeanPct: Number(row.discountMeanPct),
+      discountMinPct: Number(row.discountMinPct),
+      discountMaxPct: Number(row.discountMaxPct),
+      firstObservedAt: new Date(row.firstObservedAt as string | Date).toISOString(),
+    })),
     degradedReason: null,
   };
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { describeArchiveError, getLatestArchivedLiquidity } from "@/lib/archive";
+import { describeArchiveError, getLatestArchivedLiquidity, getRouteTrackRecords } from "@/lib/archive";
 import { measureMarkedTrade, parseTradeInputs } from "@/lib/marked-trade";
 import { findTesseraSnapshot, isAllowedTesseraMint } from "@/lib/tessera";
 
@@ -50,7 +50,7 @@ export async function GET(
   try {
     const { notionalUsd, tolerancePct } = parseTradeInputs(request);
     const comparisonSymbol = snapshot.comparison?.prestocks.symbol ?? null;
-    const [trade, preStocksDepth] = await Promise.all([
+    const [trade, preStocksDepth, trackRecords] = await Promise.all([
       measureMarkedTrade({
         venue: "tessera",
         symbol: snapshot.token.symbol,
@@ -71,13 +71,21 @@ export async function GET(
             },
           )
         : Promise.resolve(null),
+      getRouteTrackRecords("7d").catch((error: unknown) => {
+        console.error("[FairPrint tessera] Track record read failed", { error: describeArchiveError(error) });
+        return { data: [], degradedReason: null };
+      }),
     ]);
+    const trackRecord = trackRecords.data.find(
+      (record) => record.symbol === snapshot.token.symbol && record.compareSymbol === comparisonSymbol,
+    ) ?? null;
 
     return NextResponse.json(
       {
         snapshot,
         ...trade,
         comparisonDepth1PctUsd: preStocksDepth?.depth1PctUsd ?? null,
+        trackRecord,
         notionalUsd,
         tolerancePct,
         measuredAt: new Date().toISOString(),
