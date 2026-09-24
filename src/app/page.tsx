@@ -25,6 +25,7 @@ export default function HomePage() {
           <nav className="site-head__nav" aria-label="Sections">
             <Link href="/" aria-current="page">xStocks</Link>
             <Link href="/prestocks">PreStocks</Link>
+            <Link href="/tessera">Tessera</Link>
           </nav>
         </header>
 

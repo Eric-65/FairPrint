@@ -11,11 +11,12 @@ import {
 } from "./market-data";
 import { measureLiquidity, type LiquidityMeasurement } from "./liquidity";
 import { getCachedPreStocksAssets, type PreStocksAsset } from "./prestocks";
+import { getTesseraSnapshots, type TesseraSnapshot } from "./tessera";
 import { TRACKED_ASSETS, type TrackedAsset } from "./tracked-assets";
 
 export const ARCHIVE_NOT_CONFIGURED = "Archive is not configured";
 
-export type ObservationVenue = "xstocks" | "prestocks";
+export type ObservationVenue = "xstocks" | "prestocks" | "tessera";
 
 // Every run records prices for all symbols but probes route depth for only the
 // stalest few (across both venues), keeping Jupiter quote traffic inside the
@@ -189,14 +190,50 @@ function collectPreStocksObservation(
   };
 }
 
+function collectTesseraObservation(
+  snapshot: TesseraSnapshot,
+  observedAt: Date,
+  liquidityResult: PromiseSettledResult<LiquidityMeasurement> | null,
+): NewObservation {
+  const degradedReasons: string[] = [];
+  if (snapshot.degradedReason) degradedReasons.push(snapshot.degradedReason);
+  const liquidity = liquidityFields(
+    liquidityResult,
+    { venue: "tessera", symbol: snapshot.token.symbol, mint: snapshot.token.mint },
+    degradedReasons,
+  );
+
+  return {
+    venue: "tessera",
+    symbol: snapshot.token.symbol,
+    mint: snapshot.token.mint,
+    observedAt,
+    onchainPrice: snapshot.onchainPrice,
+    referencePrice: snapshot.token.markPrice,
+    premiumPct: snapshot.premiumPct,
+    referenceSource: "tessera",
+    referencePublishedAt: null,
+    confidenceInterval: null,
+    marketPeriod: null,
+    marketOpen: false,
+    halted: false,
+    jupiterBlockId: snapshot.jupiterBlockId,
+    ...liquidity,
+    degraded: degradedReasons.length > 0,
+    degradedReason: degradedReasons.length > 0 ? degradedReasons.join("; ") : null,
+  };
+}
+
 async function pickDepthTargets(
   db: NonNullable<ReturnType<typeof getDb>>,
   xStocksAssets: readonly (TrackedAsset & { mint: string })[],
   preStocksAssets: readonly PreStocksAsset[],
+  tesseraSnapshots: readonly TesseraSnapshot[],
 ): Promise<DepthTarget[]> {
   const targets: DepthTarget[] = [
     ...xStocksAssets.map((asset) => ({ venue: "xstocks" as const, symbol: asset.symbol, mint: asset.mint })),
     ...preStocksAssets.map((asset) => ({ venue: "prestocks" as const, symbol: asset.symbol, mint: asset.mint })),
+    ...tesseraSnapshots.map(({ token }) => ({ venue: "tessera" as const, symbol: token.symbol, mint: token.mint })),
   ];
   // Rotate on the last probe attempt, not the last success: a ticker with no
   // Jupiter route never succeeds, and ordering by success would re-pick it
@@ -267,11 +304,20 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
       return { assets: [] as PreStocksAsset[], error: errorMessage(error, "PreStocks fetch failed") };
     },
   );
-  const [snapshots, preStocks, liquidityByKey] = await Promise.all([
+  const tesseraPromise = getTesseraSnapshots().then(
+    ({ snapshots }) => ({ snapshots, error: null as string | null }),
+    (error: unknown) => {
+      console.error("[FairPrint archive] Tessera fetch failed", { error });
+      return { snapshots: [] as TesseraSnapshot[], error: errorMessage(error, "Tessera fetch failed") };
+    },
+  );
+  const [snapshots, preStocks, tessera, liquidityByKey] = await Promise.all([
     getTickerSnapshots(xStocksAssets),
     preStocksPromise,
-    preStocksPromise
-      .then(({ assets }) => pickDepthTargets(db, xStocksAssets, assets))
+    tesseraPromise,
+    Promise.all([preStocksPromise, tesseraPromise])
+      .then(([{ assets }, { snapshots: tesseraSnapshots }]) =>
+        pickDepthTargets(db, xStocksAssets, assets, tesseraSnapshots))
       .then(measureScheduledLiquidity),
   ]);
   const snapshotsBySymbol = new Map(snapshots.map((result) => [result.symbol, result]));
@@ -293,6 +339,13 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
         asset,
         observedAt,
         liquidityByKey.get(depthKey("prestocks", asset.symbol)) ?? null,
+      ),
+    ),
+    ...tessera.snapshots.map((snapshot) =>
+      collectTesseraObservation(
+        snapshot,
+        observedAt,
+        liquidityByKey.get(depthKey("tessera", snapshot.token.symbol)) ?? null,
       ),
     ),
   ];
@@ -321,13 +374,16 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
   if (preStocks.error) {
     incrementReason(degradedReasons, `PreStocks: ${preStocks.error}`);
   }
+  if (tessera.error) {
+    incrementReason(degradedReasons, `Tessera: ${tessera.error}`);
+  }
   if (unresolved > 0) {
     degradedReasons["xStocks mint lookup failed"] = unresolved;
   }
 
   return {
     observedAt: observedAt.toISOString(),
-    attempted: TRACKED_ASSETS.length + preStocks.assets.length,
+    attempted: TRACKED_ASSETS.length + preStocks.assets.length + tessera.snapshots.length,
     inserted: inserted.length,
     degraded: inserted.filter((row) => row.degraded).length,
     widestPremium,
@@ -414,6 +470,130 @@ export async function getLatestArchivedLiquidity(
 
   return {
     data: [...bySymbol.values()],
+    degradedReason: null,
+  };
+}
+
+export const HISTORY_RANGES = {
+  "24h": { spanMs: 24 * 3_600_000, bucket: "15 minutes", bucketMs: 15 * 60_000 },
+  "7d": { spanMs: 7 * 86_400_000, bucket: "1 hour", bucketMs: 60 * 60_000 },
+  "30d": { spanMs: 30 * 86_400_000, bucket: "6 hours", bucketMs: 6 * 60 * 60_000 },
+} as const;
+
+export type HistoryRange = keyof typeof HISTORY_RANGES;
+
+export interface PremiumHistoryPoint {
+  bucketStart: string;
+  premiumAvg: number;
+  premiumMin: number;
+  premiumMax: number;
+  tokenPriceAvg: number | null;
+  markPriceAvg: number | null;
+  readings: number;
+}
+
+export interface PremiumHistorySummary {
+  firstObservedAt: string;
+  lastObservedAt: string;
+  readings: number;
+  premiumMin: number;
+  premiumMax: number;
+  premiumMean: number;
+  // Share of readings more than 2% from the mark, the gate's overpay line.
+  pctBeyondTwoPct: number;
+  depthMedianUsd: number | null;
+}
+
+export interface PremiumHistory {
+  range: HistoryRange;
+  windowStart: string;
+  windowEnd: string;
+  bucketMs: number;
+  points: PremiumHistoryPoint[];
+  summary: PremiumHistorySummary | null;
+}
+
+export async function getPremiumHistory(
+  venue: ObservationVenue,
+  symbol: string,
+  range: HistoryRange,
+): Promise<ArchiveRead<PremiumHistory>> {
+  const { spanMs, bucket, bucketMs } = HISTORY_RANGES[range];
+  const windowEnd = new Date();
+  const windowStart = new Date(windowEnd.getTime() - spanMs);
+  const frame = { range, windowStart: windowStart.toISOString(), windowEnd: windowEnd.toISOString(), bucketMs };
+  const empty = { ...frame, points: [], summary: null };
+  const db = getDb();
+  if (!db) {
+    return { data: empty, degradedReason: ARCHIVE_NOT_CONFIGURED };
+  }
+
+  await ensureSchema(db);
+  const window = sql`
+    venue = ${venue}
+      and symbol = ${symbol}
+      and premium_pct is not null
+      and observed_at >= ${windowStart}`;
+  const [buckets, summary] = await Promise.all([
+    db.execute(sql`
+      select
+        date_bin(${bucket}::interval, observed_at, timestamptz '2000-01-01 00:00:00+00') as "bucketStart",
+        avg(premium_pct) as "premiumAvg",
+        min(premium_pct) as "premiumMin",
+        max(premium_pct) as "premiumMax",
+        avg(onchain_price) as "tokenPriceAvg",
+        avg(reference_price) as "markPriceAvg",
+        count(*)::integer as readings
+      from ${observations}
+      where ${window}
+      group by 1
+      order by 1
+    `),
+    db.execute(sql`
+      select
+        min(observed_at) as "firstObservedAt",
+        max(observed_at) as "lastObservedAt",
+        count(*)::integer as readings,
+        min(premium_pct) as "premiumMin",
+        max(premium_pct) as "premiumMax",
+        avg(premium_pct) as "premiumMean",
+        100.0 * count(*) filter (where abs(premium_pct) > 2) / nullif(count(*), 0) as "pctBeyondTwoPct",
+        percentile_cont(0.5) within group (order by depth_1pct_usd) as "depthMedianUsd"
+      from ${observations}
+      where ${window}
+    `),
+  ]);
+
+  const toIso = (value: unknown) => new Date(value as string | Date).toISOString();
+  const toNumber = (value: unknown) => (value === null ? null : Number(value));
+  const points = (buckets.rows as Record<string, unknown>[]).map((row) => ({
+    bucketStart: toIso(row.bucketStart),
+    premiumAvg: Number(row.premiumAvg),
+    premiumMin: Number(row.premiumMin),
+    premiumMax: Number(row.premiumMax),
+    tokenPriceAvg: toNumber(row.tokenPriceAvg),
+    markPriceAvg: toNumber(row.markPriceAvg),
+    readings: Number(row.readings),
+  }));
+  const totals = summary.rows[0] as Record<string, unknown> | undefined;
+
+  return {
+    data: {
+      ...frame,
+      points,
+      summary: totals && Number(totals.readings) > 0
+        ? {
+            firstObservedAt: toIso(totals.firstObservedAt),
+            lastObservedAt: toIso(totals.lastObservedAt),
+            readings: Number(totals.readings),
+            premiumMin: Number(totals.premiumMin),
+            premiumMax: Number(totals.premiumMax),
+            premiumMean: Number(totals.premiumMean),
+            pctBeyondTwoPct: Number(totals.pctBeyondTwoPct),
+            depthMedianUsd: toNumber(totals.depthMedianUsd),
+          }
+        : null,
+    },
     degradedReason: null,
   };
 }

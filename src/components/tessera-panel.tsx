@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { PremiumHistory } from "@/components/premium-history";
 import { decideExecutionGate } from "@/lib/gate";
-import type { PreStocksAsset } from "@/lib/prestocks";
+import type { TesseraSnapshot } from "@/lib/tessera";
 
 interface DepthMeasurement {
   routeLabel: string | null;
@@ -42,20 +42,12 @@ interface CostMeasurement {
   quotedAt: string;
 }
 
-interface CrossCheck {
-  jupiterPrice: number | null;
-  tokenPrice: number | null;
-  divergencePct: number | null;
-  flagged: boolean;
-  error: string | null;
-}
-
 interface DetailResponse {
-  asset: PreStocksAsset;
+  snapshot: TesseraSnapshot;
   depth: DepthMeasurement;
   cost: CostMeasurement | null;
   costDegradedReason: string | null;
-  crossCheck: CrossCheck;
+  comparisonDepth1PctUsd: number | null;
   notionalUsd: number;
   tolerancePct: number;
   measuredAt: string;
@@ -80,19 +72,9 @@ const percentFormat: NonNullable<NumberFlowProps["format"]> = {
   maximumFractionDigits: 2,
 };
 
-async function fetchDetail(
-  symbol: string,
-  notionalUsd: number,
-  tolerancePct: number,
-): Promise<DetailResponse> {
-  const params = new URLSearchParams({
-    notional: String(notionalUsd),
-    slippage: String(tolerancePct),
-  });
-  const response = await fetch(
-    `/api/prestocks/${encodeURIComponent(symbol)}?${params}`,
-    { cache: "no-store" },
-  );
+async function fetchDetail(symbol: string, notionalUsd: number, tolerancePct: number): Promise<DetailResponse> {
+  const params = new URLSearchParams({ notional: String(notionalUsd), slippage: String(tolerancePct) });
+  const response = await fetch(`/api/tessera/${encodeURIComponent(symbol)}?${params}`, { cache: "no-store" });
   if (!response.ok) {
     const failure = (await response.json()) as ApiError;
     throw new Error(`${failure.error}. ${failure.action}${failure.detail ? ` ${failure.detail}` : ""}`);
@@ -117,15 +99,84 @@ function compactDollars(value: number | null) {
   return `$${Math.floor(value).toLocaleString("en-US")}`;
 }
 
+export function compactValuation(value: number | null) {
+  if (value === null) return "—";
+  if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`;
+  if (value >= 1e9) return `$${(value / 1e9).toFixed(value >= 1e11 ? 0 : 1)}B`;
+  return `$${Math.round(value / 1e6).toLocaleString("en-US")}M`;
+}
+
 function signedDollars(value: number) {
-  const absolute = Math.abs(value).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  const absolute = Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return `${value < 0 ? "−" : ""}$${absolute}`;
 }
 
-export function PreStocksPanel({ symbol }: { symbol: string }) {
+function CheapestRoute({ snapshot, comparisonDepth, tesseraDepth, notional }: {
+  snapshot: TesseraSnapshot;
+  comparisonDepth: number | null;
+  tesseraDepth: number | null;
+  notional: number;
+}) {
+  const { token, comparison } = snapshot;
+  if (!comparison) {
+    return (
+      <section className="confidence-band" aria-labelledby="tessera-route-title">
+        <div>
+          <h2 id="tessera-route-title">Cheapest route to {token.company}</h2>
+          <p>{token.symbol} is the only tokenized {token.company} exposure FairPrint tracks, so there is no other venue to compare.</p>
+        </div>
+      </section>
+    );
+  }
+
+  const { prestocks, tesseraDiscountPct } = comparison;
+  const tesseraCheaper = tesseraDiscountPct !== null && tesseraDiscountPct > 0;
+  const cheaperDepth = tesseraCheaper ? tesseraDepth : comparisonDepth;
+  const verdict = tesseraDiscountPct === null
+    ? "A live price is missing on one side, so the two routes can't be compared right now."
+    : Math.abs(tesseraDiscountPct) < 0.05
+      ? `Both tokens price ${token.company} the same at live prices.`
+      : tesseraCheaper
+        ? `${token.symbol} is ${tesseraDiscountPct.toFixed(1)}% cheaper exposure to ${token.company} than PreStocks' ${prestocks.symbol}.`
+        : `${token.symbol} is ${Math.abs(tesseraDiscountPct).toFixed(1)}% more expensive exposure to ${token.company} than PreStocks' ${prestocks.symbol}.`;
+  const sizeCaveat = tesseraDiscountPct !== null && cheaperDepth !== null && cheaperDepth < notional
+    ? ` At $${notional.toLocaleString("en-US")}, though, the cheaper route can only absorb about ${compactDollars(cheaperDepth)} before 1% price impact.`
+    : "";
+
+  return (
+    <section className="cheapest-route" aria-labelledby="tessera-route-title" data-winner={tesseraCheaper ? "tessera" : "other"}>
+      <h2 id="tessera-route-title">Cheapest route to {token.company}</h2>
+      <p className="cheapest-route__verdict">{verdict}{sizeCaveat}</p>
+      <div className="cheapest-route__venues">
+        <div data-lead={tesseraCheaper}>
+          <span>{token.symbol} · Tessera{tesseraCheaper ? " · cheaper route" : ""}</span>
+          <strong>{compactValuation(snapshot.impliedValuation)}</strong>
+          <small>
+            {token.company} valuation implied by the live price{snapshot.onchainPrice !== null ? ` of $${snapshot.onchainPrice.toFixed(2)}` : ""}
+            {" "}(Tessera marks it at {compactValuation(token.markValuation)}). Depth at 1%: {compactDollars(tesseraDepth)}.
+          </small>
+        </div>
+        <div data-lead={tesseraDiscountPct !== null && !tesseraCheaper}>
+          <span>{prestocks.symbol} · PreStocks{tesseraDiscountPct !== null && !tesseraCheaper ? " · cheaper route" : ""}</span>
+          <strong>{compactValuation(prestocks.impliedValuation)}</strong>
+          <small>
+            {token.company} valuation implied by the live price{prestocks.livePrice !== null ? ` of $${prestocks.livePrice.toFixed(2)}` : ""}
+            {" "}(PreStocks marks it at {compactValuation(prestocks.markValuation)}). Depth at 1%: {compactDollars(comparisonDepth)}.
+          </small>
+        </div>
+      </div>
+      <p className="cheapest-route__method">
+        Each venue splits {token.company}{" "}
+        into different-sized tokens, so token prices aren&apos;t comparable. FairPrint
+        converts each live price into the company valuation it implies (live price ÷ mark price × mark valuation);
+        the lower valuation is the cheaper way in. Prices: Jupiter Price v3
+        {prestocks.priceSource === "PreStocks tokenPrice" ? `, with PreStocks' own tokenPrice for ${prestocks.symbol} because Jupiter had no price` : ""}.
+      </p>
+    </section>
+  );
+}
+
+export function TesseraPanel({ symbol }: { symbol: string }) {
   const reduceMotion = usePrefersReducedMotion();
   const [notional, setNotional] = useState(1_000);
   const [tolerance, setTolerance] = useState(1);
@@ -134,7 +185,7 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
   const [confirmation, setConfirmation] = useState("");
   const [copyStatus, setCopyStatus] = useState("Copy mint");
   const { data, error, isPending, isFetching, refetch } = useQuery({
-    queryKey: ["prestocks-panel", symbol, quotedInputs.notional, quotedInputs.tolerance],
+    queryKey: ["tessera-panel", symbol, quotedInputs.notional, quotedInputs.tolerance],
     queryFn: () => fetchDetail(symbol, quotedInputs.notional, quotedInputs.tolerance),
     refetchInterval: 15_000,
   });
@@ -151,7 +202,7 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
 
   const decision = useMemo(
     () => decideExecutionGate({
-      premiumPct: data?.asset.premiumPct ?? null,
+      premiumPct: data?.snapshot.premiumPct ?? null,
       maxFillableUsd: data?.depth.depth1PctUsd ?? null,
       notionalUsd: notional,
       halted: false,
@@ -172,13 +223,15 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
     );
   }
 
-  const { asset, depth, cost, crossCheck } = data;
-  const jupiterUrl = `https://jup.ag/swap/USDC-${asset.mint}`;
+  const { snapshot, depth, cost } = data;
+  const { token } = snapshot;
+  const jupiterUrl = `https://jup.ag/swap/USDC-${token.mint}`;
   const confirmed = confirmation.trim().toUpperCase() === "OVERPAY";
+  const discount = snapshot.comparison?.tesseraDiscountPct ?? null;
 
   async function copyMint() {
     try {
-      await navigator.clipboard.writeText(asset.mint);
+      await navigator.clipboard.writeText(token.mint);
       setCopyStatus("Mint copied");
       window.setTimeout(() => setCopyStatus("Copy mint"), 1_800);
     } catch {
@@ -193,87 +246,72 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
       initial={false}
       animate={{ opacity: 1 }}
       transition={{ type: "spring", stiffness: 420, damping: 38 }}
-      aria-labelledby="prestocks-trade-symbol"
+      aria-labelledby="tessera-trade-symbol"
     >
       <header className="trade-panel__status">
-        <Link href="/prestocks">Back to PreStocks watch</Link>
-        <span><i data-active={isFetching} />{isFetching ? "Remeasuring" : "PreStocks · private company, no market hours"}</span>
+        <Link href="/tessera">Back to Tessera watch</Link>
+        <span><i data-active={isFetching} />{isFetching ? "Remeasuring" : "Tessera · private company, no market hours"}</span>
       </header>
 
       <div className="trade-verdict">
-        <p id="prestocks-trade-symbol">{asset.symbol} execution check</p>
-        {asset.premiumPct === null ? (
+        <p id="tessera-trade-symbol">{token.symbol} execution check</p>
+        {snapshot.premiumPct === null ? (
           <strong className="trade-verdict__unavailable">Not measured</strong>
         ) : (
-          <NumberFlow
-            className="trade-verdict__number"
-            value={asset.premiumPct}
-            format={percentFormat}
-            suffix="%"
-            animated={!reduceMotion}
-          />
+          <NumberFlow className="trade-verdict__number" value={snapshot.premiumPct} format={percentFormat} suffix="%" animated={!reduceMotion} />
         )}
-        <h1>{asset.premiumPct !== null && asset.premiumPct >= 0 ? "Above" : "Below"} the PreStocks mark</h1>
+        <h1>{snapshot.premiumPct !== null && snapshot.premiumPct >= 0 ? "Above" : "Below"} the Tessera mark</h1>
       </div>
 
       <div className="trade-raw-prices">
         <div>
-          <span>Token price</span>
-          {asset.tokenPrice === null ? <strong>Unavailable</strong> : <NumberFlow value={asset.tokenPrice} format={moneyFormat} animated={!reduceMotion} />}
-          <small>The token&apos;s actual price, as reported by PreStocks</small>
+          <span>Live on-chain price</span>
+          {snapshot.onchainPrice === null ? <strong>Unavailable</strong> : <NumberFlow value={snapshot.onchainPrice} format={moneyFormat} animated={!reduceMotion} />}
+          <small>Jupiter Price v3, block {snapshot.jupiterBlockId ?? "unavailable"}</small>
           <div className="mint-actions">
-            <button type="button" onClick={() => void copyMint()} title={asset.mint}>
-              {`${asset.mint.slice(0, 5)}…${asset.mint.slice(-5)}`} · {copyStatus}
+            <button type="button" onClick={() => void copyMint()} title={token.mint}>
+              {`${token.mint.slice(0, 5)}…${token.mint.slice(-5)}`} · {copyStatus}
             </button>
-            <a href={`https://solscan.io/token/${asset.mint}`} target="_blank" rel="noreferrer">Verify on Solscan</a>
+            <a href={`https://solscan.io/token/${token.mint}`} target="_blank" rel="noreferrer">Verify on Solscan</a>
           </div>
         </div>
         <div>
-          <span>PreStocks mark</span>
-          {asset.markPrice === null ? <strong>Unavailable</strong> : <NumberFlow value={asset.markPrice} format={moneyFormat} animated={!reduceMotion} />}
-          <small>PreStocks&apos; own fundamental valuation mark for {asset.name}</small>
+          <span>Tessera mark</span>
+          {token.markPrice === null ? <strong>Unavailable</strong> : <NumberFlow value={token.markPrice} format={moneyFormat} animated={!reduceMotion} />}
+          <small>
+            Tessera values {token.company} at {compactValuation(token.markValuation)}
+            {token.holders !== null ? ` · ${token.holders.toLocaleString("en-US")} holders` : ""}
+            {token.sector ? ` · ${token.sector}` : ""}
+          </small>
         </div>
       </div>
 
-      <PremiumHistory venue="prestocks" symbol={asset.symbol} markLabel="PreStocks mark" />
+      <CheapestRoute
+        snapshot={snapshot}
+        comparisonDepth={data.comparisonDepth1PctUsd}
+        tesseraDepth={depth.depth1PctUsd}
+        notional={notional}
+      />
 
-      <section className="confidence-band" aria-labelledby="prestocks-basis-title">
+      <PremiumHistory venue="tessera" symbol={token.symbol} markLabel="Tessera mark" />
+
+      <section className="confidence-band" aria-labelledby="tessera-basis-title">
         <div>
-          <h2 id="prestocks-basis-title">Reference basis</h2>
+          <h2 id="tessera-basis-title">Reference basis</h2>
           <p>
-            PreStocks mark as of {relativeAge(asset.fetchedAt)} ago. PreStocks publishes no confidence
-            interval, so FairPrint will not draw a guessed band.
+            Tessera mark as of {relativeAge(token.fetchedAt)} ago. Tessera publishes no confidence interval or
+            timestamp for its mark, so FairPrint shows its own fetch time and will not draw a guessed band.
           </p>
-        </div>
-      </section>
-
-      <section className="confidence-band" aria-labelledby="prestocks-crosscheck-title">
-        <div>
-          <h2 id="prestocks-crosscheck-title">Cross-check against live on-chain price</h2>
-          {crossCheck.jupiterPrice === null ? (
-            <p className="confidence-unavailable">
-              {crossCheck.error ?? "Jupiter Price v3 did not return a price for this mint."}
-            </p>
-          ) : (
-            <p className={crossCheck.flagged ? "degraded-note" : undefined}>
-              PreStocks reports {asset.tokenPrice !== null ? `$${asset.tokenPrice.toFixed(4)}` : "no price"}, live
-              on-chain shows ${crossCheck.jupiterPrice.toFixed(4)}
-              {crossCheck.divergencePct !== null ? ` (${crossCheck.divergencePct.toFixed(2)}% apart)` : ""}.{" "}
-              {crossCheck.flagged
-                ? "This is a larger gap than expected between PreStocks' own reported price and live on-chain data."
-                : "These are in line with each other."}
-            </p>
-          )}
         </div>
       </section>
 
       <div className="trade-measures">
         <div className="trade-size">
-          <label htmlFor="prestocks-trade-notional">Order size in US dollars</label>
-          <span>$<input id="prestocks-trade-notional" inputMode="decimal" min="100" max="100000" step="100" type="number" value={notional} onChange={(event) => setNotional(Math.max(0, Number(event.target.value) || 0))} /></span>
-          <label className="tolerance-input" htmlFor="prestocks-trade-tolerance">
+          <label htmlFor="tessera-trade-notional">Order size in US dollars</label>
+          <span>$<input id="tessera-trade-notional" inputMode="decimal" min="100" max="100000" step="100" type="number" value={notional} onChange={(event) => setNotional(Math.max(0, Number(event.target.value) || 0))} /></span>
+          <label className="tolerance-input" htmlFor="tessera-trade-tolerance">
             Slippage tolerance
-            <input id="prestocks-trade-tolerance" inputMode="decimal" min="0.1" max="5" step="0.1" type="number" value={tolerance} onChange={(event) => setTolerance(Math.max(0.1, Number(event.target.value) || 1))} />%
+            <input id="tessera-trade-tolerance" inputMode="decimal" min="0.1" max="5" step="0.1" type="number" value={tolerance} onChange={(event) => setTolerance(Math.max(0.1, Number(event.target.value) || 1))} />%
           </label>
         </div>
         <div>
@@ -282,21 +320,21 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
           <small>
             {depth.source === "live"
               ? `${depth.probes} live Jupiter probes via ${depth.routeLabel ?? "no route"}`
-              : `Archived Jupiter binary search from ${relativeAge(depth.observedAt)} ago via ${depth.routeLabel ?? "no route"}`}
+              : `Archived Jupiter search from ${relativeAge(depth.observedAt)} ago via ${depth.routeLabel ?? "no route"}`}
           </small>
         </div>
         <div className="cost-measure">
           <span>
             All-in cost at size
-            <button type="button" popoverTarget={`prestocks-cost-${asset.symbol}`}>Breakdown</button>
+            <button type="button" popoverTarget={`tessera-cost-${token.symbol}`}>Breakdown</button>
           </span>
           <strong>{cost ? signedDollars(cost.allInUsd) : "Unavailable"}</strong>
           <small>
             {cost
-              ? `${cost.allInPct >= 0 ? "+" : ""}${cost.allInPct.toFixed(3)}% versus the PreStocks mark`
+              ? `${cost.allInPct >= 0 ? "+" : ""}${cost.allInPct.toFixed(3)}% versus the Tessera mark`
               : data.costDegradedReason ?? "Entered-size quote unavailable"}
           </small>
-          <div className="cost-popover" id={`prestocks-cost-${asset.symbol}`} popover="auto">
+          <div className="cost-popover" id={`tessera-cost-${token.symbol}`} popover="auto">
             <strong>All-in cost breakdown</strong>
             {cost ? (
               <dl>
@@ -338,9 +376,11 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
       <aside className="rights-panel">
         <h2>What you actually own</h2>
         <p>
-          This is SPV exposure tracking {asset.name}&apos;s price, not direct equity in the company.
-          There are no voting rights. Liquidity depends entirely on this token&apos;s own secondary
-          market, which can be thin or absent.
+          T-Tokens are loan participation rights tracking {token.company}&apos;s value, not shares or other securities,
+          and carry no voting rights. Redemption and settlement follow Tessera&apos;s{" "}
+          <a href="https://terms.tessera.pe" target="_blank" rel="noreferrer">terms and conditions</a>. Tessera states the
+          backing is auditable through Chainlink Proof of Reserves with custody at Fireblocks; FairPrint does not verify
+          that independently. Liquidity depends on this token&apos;s Solana DEX pools, which can be thin.
         </p>
       </aside>
 
@@ -360,8 +400,8 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
               <button className="gate-secondary" type="button" onClick={() => setOverrideOpen(true)}>Override this gate</button>
             ) : (
               <div className="gate-override">
-                <label htmlFor="prestocks-override-confirmation">Type OVERPAY to acknowledge the measured cost and depth risk.</label>
-                <input id="prestocks-override-confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" />
+                <label htmlFor="tessera-override-confirmation">Type OVERPAY to acknowledge the measured cost and depth risk.</label>
+                <input id="tessera-override-confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" />
                 <a aria-disabled={!confirmed} href={confirmed ? jupiterUrl : undefined} target="_blank" rel="noreferrer">Continue to Jupiter</a>
               </div>
             )}
@@ -371,8 +411,10 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
         ) : (
           <a className="gate-primary" href={jupiterUrl} target="_blank" rel="noreferrer">
             {decision.gate === "caution" && cost
-              ? `Swap anyway — this costs about $${Math.abs(cost.allInUsd).toFixed(2)} versus the PreStocks mark`
-              : `Continue with ${asset.symbol}`}
+              ? `Swap anyway — this costs about $${Math.abs(cost.allInUsd).toFixed(2)} versus the Tessera mark`
+              : discount !== null && discount > 0.05
+                ? `Buy ${token.symbol} — ${discount.toFixed(1)}% cheaper ${token.company} exposure than PreStocks`
+                : `Continue with ${token.symbol}`}
           </a>
         )}
       </div>
