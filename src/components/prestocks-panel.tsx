@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { PremiumHistory } from "@/components/premium-history";
 import { decideExecutionGate } from "@/lib/gate";
 import type { PreStocksAsset } from "@/lib/prestocks";
 
@@ -233,6 +234,8 @@ export function PreStocksPanel({ symbol }: { symbol: string }) {
           <small>PreStocks&apos; own fundamental valuation mark for {asset.name}</small>
         </div>
       </div>
+
+      <PremiumHistory symbol={asset.symbol} />
 
       <section className="confidence-band" aria-labelledby="prestocks-basis-title">
         <div>

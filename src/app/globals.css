@@ -1030,6 +1030,213 @@ p {
   font-size: 0.6875rem;
 }
 
+.premium-history {
+  /* The verdict color alone drops below 3:1 on the dark panel; pulling it
+     toward the text color keeps the line >= 3:1 in both themes. */
+  --history-line: color-mix(in oklch, var(--state-color) 65%, var(--text-color));
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-top: 1px solid var(--strong-rule);
+}
+
+.premium-history__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+}
+
+.premium-history h2 {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.premium-history__ranges {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.premium-history__ranges button {
+  min-height: 2rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--rule-color);
+  background: transparent;
+  color: var(--muted-color);
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.premium-history__ranges button[aria-pressed="true"] {
+  border-color: var(--text-color);
+  color: var(--text-color);
+}
+
+.premium-history__ranges button:focus-visible,
+.premium-history__hit:focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+.history-summary p {
+  max-width: 62ch;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.history-summary dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  margin: 0.6rem 0 0;
+}
+
+.history-summary dt {
+  color: var(--muted-color);
+  font-size: 0.625rem;
+}
+
+.history-summary dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.premium-history__frame {
+  position: relative;
+  min-height: 240px;
+  transition: opacity 200ms linear;
+}
+
+.premium-history__frame[data-refreshing="true"] {
+  opacity: 0.55;
+}
+
+.premium-history__frame svg {
+  display: block;
+  overflow: visible;
+}
+
+.premium-history__empty {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  padding: 1rem;
+  border: 1px solid var(--rule-color);
+  color: var(--muted-color);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.premium-history__grid {
+  stroke: var(--rule-color);
+  stroke-width: 1;
+}
+
+.premium-history__mark {
+  stroke: var(--strong-rule);
+  stroke-width: 1;
+}
+
+.premium-history__tick,
+.premium-history__mark-label {
+  fill: var(--muted-color);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.premium-history__band {
+  fill: color-mix(in oklch, var(--state-color) 10%, transparent);
+}
+
+.premium-history__line {
+  fill: none;
+  stroke: var(--history-line);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.premium-history__dot {
+  fill: var(--history-line);
+  stroke: var(--panel-color);
+  stroke-width: 2;
+}
+
+.premium-history__end-label {
+  fill: var(--text-color);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.premium-history__crosshair {
+  stroke: var(--strong-rule);
+  stroke-width: 1;
+}
+
+.premium-history__hit {
+  fill: transparent;
+  cursor: crosshair;
+  /* Horizontal drags scrub the readout on touch screens; vertical still scrolls. */
+  touch-action: pan-y;
+}
+
+.premium-history__readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.75rem;
+  min-height: 2.6rem;
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+}
+
+.premium-history__readout strong {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-color);
+  font-size: 0.9rem;
+}
+
+.premium-history__readout i {
+  width: 0.9rem;
+  border-top: 2px solid var(--history-line);
+}
+
+.premium-history__table {
+  overflow-x: auto;
+}
+
+.premium-history__table summary {
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+  cursor: pointer;
+}
+
+.premium-history__table table {
+  width: 100%;
+  margin-top: 0.6rem;
+  border-collapse: collapse;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.premium-history__table th,
+.premium-history__table td {
+  padding: 0.3rem 0.5rem 0.3rem 0;
+  border-bottom: 1px solid var(--rule-color);
+  text-align: left;
+}
+
+.premium-history__table th {
+  color: var(--muted-color);
+  font-weight: 620;
+}
+
 .confidence-scale__track {
   position: relative;
   height: 1.5rem;
