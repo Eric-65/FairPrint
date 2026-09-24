@@ -7,5 +7,5 @@ export async function GET(
   context: { params: Promise<{ symbol: string }> },
 ) {
   const { symbol } = await context.params;
-  return premiumHistoryResponse("prestocks", symbol, request);
+  return premiumHistoryResponse("tessera", symbol, request);
 }

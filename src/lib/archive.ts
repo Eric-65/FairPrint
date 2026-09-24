@@ -11,11 +11,12 @@ import {
 } from "./market-data";
 import { measureLiquidity, type LiquidityMeasurement } from "./liquidity";
 import { getCachedPreStocksAssets, type PreStocksAsset } from "./prestocks";
+import { getTesseraSnapshots, type TesseraSnapshot } from "./tessera";
 import { TRACKED_ASSETS, type TrackedAsset } from "./tracked-assets";
 
 export const ARCHIVE_NOT_CONFIGURED = "Archive is not configured";
 
-export type ObservationVenue = "xstocks" | "prestocks";
+export type ObservationVenue = "xstocks" | "prestocks" | "tessera";
 
 // Every run records prices for all symbols but probes route depth for only the
 // stalest few (across both venues), keeping Jupiter quote traffic inside the
@@ -189,14 +190,50 @@ function collectPreStocksObservation(
   };
 }
 
+function collectTesseraObservation(
+  snapshot: TesseraSnapshot,
+  observedAt: Date,
+  liquidityResult: PromiseSettledResult<LiquidityMeasurement> | null,
+): NewObservation {
+  const degradedReasons: string[] = [];
+  if (snapshot.degradedReason) degradedReasons.push(snapshot.degradedReason);
+  const liquidity = liquidityFields(
+    liquidityResult,
+    { venue: "tessera", symbol: snapshot.token.symbol, mint: snapshot.token.mint },
+    degradedReasons,
+  );
+
+  return {
+    venue: "tessera",
+    symbol: snapshot.token.symbol,
+    mint: snapshot.token.mint,
+    observedAt,
+    onchainPrice: snapshot.onchainPrice,
+    referencePrice: snapshot.token.markPrice,
+    premiumPct: snapshot.premiumPct,
+    referenceSource: "tessera",
+    referencePublishedAt: null,
+    confidenceInterval: null,
+    marketPeriod: null,
+    marketOpen: false,
+    halted: false,
+    jupiterBlockId: snapshot.jupiterBlockId,
+    ...liquidity,
+    degraded: degradedReasons.length > 0,
+    degradedReason: degradedReasons.length > 0 ? degradedReasons.join("; ") : null,
+  };
+}
+
 async function pickDepthTargets(
   db: NonNullable<ReturnType<typeof getDb>>,
   xStocksAssets: readonly (TrackedAsset & { mint: string })[],
   preStocksAssets: readonly PreStocksAsset[],
+  tesseraSnapshots: readonly TesseraSnapshot[],
 ): Promise<DepthTarget[]> {
   const targets: DepthTarget[] = [
     ...xStocksAssets.map((asset) => ({ venue: "xstocks" as const, symbol: asset.symbol, mint: asset.mint })),
     ...preStocksAssets.map((asset) => ({ venue: "prestocks" as const, symbol: asset.symbol, mint: asset.mint })),
+    ...tesseraSnapshots.map(({ token }) => ({ venue: "tessera" as const, symbol: token.symbol, mint: token.mint })),
   ];
   // Rotate on the last probe attempt, not the last success: a ticker with no
   // Jupiter route never succeeds, and ordering by success would re-pick it
@@ -267,11 +304,20 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
       return { assets: [] as PreStocksAsset[], error: errorMessage(error, "PreStocks fetch failed") };
     },
   );
-  const [snapshots, preStocks, liquidityByKey] = await Promise.all([
+  const tesseraPromise = getTesseraSnapshots().then(
+    ({ snapshots }) => ({ snapshots, error: null as string | null }),
+    (error: unknown) => {
+      console.error("[FairPrint archive] Tessera fetch failed", { error });
+      return { snapshots: [] as TesseraSnapshot[], error: errorMessage(error, "Tessera fetch failed") };
+    },
+  );
+  const [snapshots, preStocks, tessera, liquidityByKey] = await Promise.all([
     getTickerSnapshots(xStocksAssets),
     preStocksPromise,
-    preStocksPromise
-      .then(({ assets }) => pickDepthTargets(db, xStocksAssets, assets))
+    tesseraPromise,
+    Promise.all([preStocksPromise, tesseraPromise])
+      .then(([{ assets }, { snapshots: tesseraSnapshots }]) =>
+        pickDepthTargets(db, xStocksAssets, assets, tesseraSnapshots))
       .then(measureScheduledLiquidity),
   ]);
   const snapshotsBySymbol = new Map(snapshots.map((result) => [result.symbol, result]));
@@ -293,6 +339,13 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
         asset,
         observedAt,
         liquidityByKey.get(depthKey("prestocks", asset.symbol)) ?? null,
+      ),
+    ),
+    ...tessera.snapshots.map((snapshot) =>
+      collectTesseraObservation(
+        snapshot,
+        observedAt,
+        liquidityByKey.get(depthKey("tessera", snapshot.token.symbol)) ?? null,
       ),
     ),
   ];
@@ -321,13 +374,16 @@ export async function recordObservations(): Promise<ObservationRunSummary> {
   if (preStocks.error) {
     incrementReason(degradedReasons, `PreStocks: ${preStocks.error}`);
   }
+  if (tessera.error) {
+    incrementReason(degradedReasons, `Tessera: ${tessera.error}`);
+  }
   if (unresolved > 0) {
     degradedReasons["xStocks mint lookup failed"] = unresolved;
   }
 
   return {
     observedAt: observedAt.toISOString(),
-    attempted: TRACKED_ASSETS.length + preStocks.assets.length,
+    attempted: TRACKED_ASSETS.length + preStocks.assets.length + tessera.snapshots.length,
     inserted: inserted.length,
     degraded: inserted.filter((row) => row.degraded).length,
     widestPremium,

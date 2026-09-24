@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { describeArchiveError, getLatestArchivedLiquidity } from "@/lib/archive";
-import { measureExecutionQuote } from "@/lib/depth";
-import { getCachedLiquidity } from "@/lib/liquidity";
 import { getJupiterPrice } from "@/lib/market-data";
+import { measureMarkedTrade, parseTradeInputs } from "@/lib/marked-trade";
 import { findPreStocksAsset, isAllowedPreStocksMint } from "@/lib/prestocks";
 
 export const dynamic = "force-dynamic";
@@ -56,100 +54,18 @@ export async function GET(
   }
 
   try {
-    const url = new URL(request.url);
-    const requestedNotional = Number(url.searchParams.get("notional") ?? 1_000);
-    const requestedTolerance = Number(url.searchParams.get("slippage") ?? 1);
-    const notionalUsd = Math.min(100_000, Math.max(100, requestedNotional || 1_000));
-    const tolerancePct = Math.min(5, Math.max(0.1, requestedTolerance || 1));
-
-    const [liveDepth, archivedResult, crossCheck] = await Promise.all([
-      getCachedLiquidity(asset.mint, tolerancePct),
-      getLatestArchivedLiquidity("prestocks", [asset.symbol]).catch((error: unknown) => {
-        console.error("[FairPrint prestocks] Archive read failed", { error });
-        return { data: [], degradedReason: describeArchiveError(error) };
-      }),
-      getJupiterPrice(asset.mint),
-    ]);
-
-    const archived = archivedResult.data.find((reading) => reading.symbol === asset.symbol);
-    const usesArchivedDepth =
-      tolerancePct === 1 &&
-      liveDepth.depth1PctUsd === null &&
-      archived?.depth1PctUsd !== null &&
-      archived?.depth1PctUsd !== undefined;
-    const depth = {
-      ...liveDepth,
-      depth1PctUsd: usesArchivedDepth ? archived!.depth1PctUsd : liveDepth.depth1PctUsd,
-      priceImpactAt1kPct: usesArchivedDepth
-        ? archived!.priceImpactAt1kPct
-        : liveDepth.priceImpactAt1kPct,
-      routeLabel: usesArchivedDepth ? archived!.routeLabel : liveDepth.routeLabel,
-      poolTvlUsd: liveDepth.poolTvlUsd ?? archived?.poolTvlUsd ?? null,
-      poolVolume24hUsd: liveDepth.poolVolume24hUsd ?? archived?.poolVolume24hUsd ?? null,
-      source: usesArchivedDepth ? ("archive" as const) : ("live" as const),
-      observedAt: usesArchivedDepth
-        ? new Date(archived!.observedAt).toISOString()
-        : new Date().toISOString(),
-    };
-
-    const executionResult =
-      crossCheck.decimals === null
-        ? { quote: null, error: "Jupiter did not publish token decimals for cost calculation" }
-        : await measureExecutionQuote(
-            asset.mint,
-            notionalUsd,
-            tolerancePct,
-            crossCheck.decimals,
-          ).then(
-            (quote) => ({ quote, error: null as string | null }),
-            (error: unknown) => {
-              const message = error instanceof Error ? error.message : "Entered-size quote failed";
-              console.error("[FairPrint prestocks] Entered-size quote failed", {
-                symbol: asset.symbol,
-                notionalUsd,
-                tolerancePct,
-                error,
-              });
-              return { quote: null, error: message };
-            },
-          );
-
-    const quote = executionResult.quote;
-    const canValueOutput = quote && asset.markPrice !== null;
-    const componentCostPct =
-      quote && quote.ammFeePct !== null && asset.premiumPct !== null
-        ? asset.premiumPct + quote.priceImpactPct + quote.ammFeePct
-        : null;
-    const allInUsd =
-      quote && asset.markPrice !== null
-        ? notionalUsd - quote.outputAmount * asset.markPrice + quote.networkFeeUsd
-        : componentCostPct !== null && quote
-          ? (componentCostPct / 100) * notionalUsd + quote.networkFeeUsd
-          : null;
-    const cost =
-      quote && asset.premiumPct !== null && allInUsd !== null
-        ? {
-            notionalUsd,
-            premiumPct: asset.premiumPct,
-            priceImpactPct: quote.priceImpactPct,
-            ammFeePct: quote.ammFeePct,
-            ammFeeUsd: quote.ammFeeUsd,
-            feesItemized: quote.feesItemized,
-            networkFeeUsd: quote.networkFeeUsd,
-            allInPct: (allInUsd / notionalUsd) * 100,
-            allInUsd,
-            executableOutput: quote.outputAmount,
-            executableOutputReferenceValue: canValueOutput
-              ? quote.outputAmount * asset.markPrice!
-              : null,
-            computation: quote.feesItemized
-              ? "(premium + price impact + AMM fee) * notional + network fee"
-              : "notional - (executable output * markPrice) + network fee",
-            routeLabel: quote.routeLabel,
-            contextSlot: quote.contextSlot,
-            quotedAt: quote.quotedAt,
-          }
-        : null;
+    const { notionalUsd, tolerancePct } = parseTradeInputs(request);
+    const crossCheck = await getJupiterPrice(asset.mint);
+    const { depth, cost, costDegradedReason } = await measureMarkedTrade({
+      venue: "prestocks",
+      symbol: asset.symbol,
+      mint: asset.mint,
+      markPrice: asset.markPrice,
+      premiumPct: asset.premiumPct,
+      decimals: crossCheck.decimals,
+      notionalUsd,
+      tolerancePct,
+    });
 
     const crossCheckDivergencePct =
       crossCheck.price !== null && asset.tokenPrice !== null && asset.tokenPrice !== 0
@@ -161,11 +77,7 @@ export async function GET(
         asset,
         depth,
         cost,
-        costDegradedReason:
-          executionResult.error ??
-          (quote && !quote.feesItemized
-            ? "Jupiter Lite includes AMM fees in executable output but does not itemize them on this route."
-            : null),
+        costDegradedReason,
         crossCheck: {
           jupiterPrice: crossCheck.price,
           tokenPrice: asset.tokenPrice,

@@ -872,6 +872,9 @@ p {
 }
 
 .trade-verdict {
+  /* Size container so the hero number can shrink to fit; "+30.56%" at the
+     viewport-based size alone is wider than a phone. */
+  container-type: inline-size;
   min-height: clamp(19rem, 37vw, 29rem);
   display: flex;
   flex-direction: column;
@@ -889,7 +892,7 @@ p {
 .trade-verdict__unavailable {
   margin-block: auto 1rem;
   color: color-mix(in oklch, var(--state-color) 82%, var(--text-color));
-  font-size: clamp(5rem, 17vw, 12rem);
+  font-size: min(clamp(5rem, 17vw, 12rem), 19cqi);
   font-stretch: 125%;
   font-variant-numeric: tabular-nums;
   font-weight: 850;
@@ -1028,6 +1031,73 @@ p {
 .confidence-band p {
   color: var(--muted-color);
   font-size: 0.6875rem;
+}
+
+.cheapest-route {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border-top: 1px solid var(--strong-rule);
+}
+
+.cheapest-route h2 {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.cheapest-route__verdict {
+  max-width: 62ch;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.cheapest-route__venues {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.cheapest-route__venues > div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--rule-color);
+  border-left: 3px solid var(--rule-color);
+}
+
+.cheapest-route__venues > div[data-lead="true"] {
+  border-left-color: var(--fair);
+  background: color-mix(in oklch, var(--fair) 7%, transparent);
+}
+
+.cheapest-route__venues span {
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+  font-weight: 620;
+}
+
+.cheapest-route__venues strong {
+  font-size: 1.35rem;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+}
+
+.cheapest-route__venues small,
+.cheapest-route__method {
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 46rem) {
+  .cheapest-route__venues {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .site-head__nav {
+    gap: 0.85rem;
+  }
 }
 
 .premium-history {
@@ -1749,7 +1819,7 @@ p {
   }
 
   .trade-verdict__number {
-    font-size: clamp(5rem, 27vw, 7.5rem);
+    font-size: min(7.5rem, 19cqi);
   }
 
   .trade-raw-prices,

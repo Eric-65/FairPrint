@@ -15,9 +15,11 @@ const RANGES: { value: HistoryRange; label: string }[] = [
 const HEIGHT = 240;
 const MARGIN = { top: 18, right: 68, bottom: 28, left: 52 };
 
-async function fetchHistory(symbol: string, range: HistoryRange): Promise<HistoryResponse> {
+export type HistoryVenue = "prestocks" | "tessera";
+
+async function fetchHistory(venue: HistoryVenue, symbol: string, range: HistoryRange): Promise<HistoryResponse> {
   const response = await fetch(
-    `/api/prestocks/${encodeURIComponent(symbol)}/history?range=${range}`,
+    `/api/${venue}/${encodeURIComponent(symbol)}/history?range=${range}`,
     { cache: "no-store" },
   );
   if (!response.ok) {
@@ -42,7 +44,7 @@ function niceStep(raw: number) {
   return (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 5 ? 5 : 10) * power;
 }
 
-// Always include 0% (the PreStocks mark) so the gap is read against it.
+// Always include 0% (the venue mark) so the gap is read against it.
 function yScaleFor(points: PremiumHistoryPoint[]) {
   const low = Math.min(0, ...points.map((point) => point.premiumMin));
   const high = Math.max(0, ...points.map((point) => point.premiumMax));
@@ -105,8 +107,9 @@ function segmentsOf(points: PremiumHistoryPoint[], bucketMs: number) {
   return segments;
 }
 
-function Summary({ symbol, data, rangeLabel, windowStart }: {
+function Summary({ symbol, markLabel, data, rangeLabel, windowStart }: {
   symbol: string;
+  markLabel: string;
   data: HistoryResponse;
   rangeLabel: string;
   windowStart: number;
@@ -122,7 +125,7 @@ function Summary({ symbol, data, rangeLabel, windowStart }: {
     <div className="history-summary">
       <p>
         {symbol} traded between <strong>{signedPct(summary.premiumMin, 1)}</strong> and{" "}
-        <strong>{signedPct(summary.premiumMax, 1)}</strong> versus its PreStocks mark {coverage},
+        <strong>{signedPct(summary.premiumMax, 1)}</strong> versus its {markLabel} {coverage},
         averaging {signedPct(summary.premiumMean, 1)}.
       </p>
       <dl>
@@ -143,14 +146,18 @@ function Summary({ symbol, data, rangeLabel, windowStart }: {
   );
 }
 
-export function PremiumHistory({ symbol }: { symbol: string }) {
+export function PremiumHistory({ venue, symbol, markLabel }: {
+  venue: HistoryVenue;
+  symbol: string;
+  markLabel: string;
+}) {
   const [range, setRange] = useState<HistoryRange>("7d");
   const [width, setWidth] = useState(0);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const { data, error, isPending, isPlaceholderData } = useQuery({
-    queryKey: ["prestocks-history", symbol, range],
-    queryFn: () => fetchHistory(symbol, range),
+    queryKey: ["premium-history", venue, symbol, range],
+    queryFn: () => fetchHistory(venue, symbol, range),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -224,7 +231,7 @@ export function PremiumHistory({ symbol }: { symbol: string }) {
   return (
     <section className="premium-history" aria-labelledby="premium-history-title">
       <div className="premium-history__head">
-        <h2 id="premium-history-title">Premium to the PreStocks mark over time</h2>
+        <h2 id="premium-history-title">Premium to the {markLabel} over time</h2>
         <div className="premium-history__ranges" role="group" aria-label="Time range">
           {RANGES.map((item) => (
             <button
@@ -245,7 +252,7 @@ export function PremiumHistory({ symbol }: { symbol: string }) {
       {error && !data ? (
         <p className="confidence-unavailable">{error instanceof Error ? error.message : "History is unavailable."}</p>
       ) : null}
-      {data ? <Summary symbol={symbol} data={data} rangeLabel={rangeMeta.label} windowStart={windowStart} /> : null}
+      {data ? <Summary symbol={symbol} markLabel={markLabel} data={data} rangeLabel={rangeMeta.label} windowStart={windowStart} /> : null}
 
       {readout ? (
         <div className="premium-history__readout" aria-live="polite">
@@ -272,7 +279,7 @@ export function PremiumHistory({ symbol }: { symbol: string }) {
               width={width}
               height={HEIGHT}
               role="group"
-              aria-label={`${symbol} premium to the PreStocks mark, ${rangeMeta.label}. Use arrow keys to read values.`}
+              aria-label={`${symbol} premium to the ${markLabel}, ${rangeMeta.label}. Use arrow keys to read values.`}
             >
               {chart.y.ticks.map((tick) => (
                 <g key={tick}>
@@ -289,7 +296,7 @@ export function PremiumHistory({ symbol }: { symbol: string }) {
                 </g>
               ))}
               <text className="premium-history__mark-label" x={MARGIN.left + 6} y={chart.yOf(0) - 6}>
-                PreStocks mark
+                {markLabel}
               </text>
               {chart.xTicks.map((time) => (
                 <text key={time} className="premium-history__tick" x={chart.xOf(time)} y={HEIGHT - 8} textAnchor="middle">

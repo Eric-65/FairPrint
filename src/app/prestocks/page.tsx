@@ -30,6 +30,7 @@ export default function PreStocksPage() {
           <nav className="site-head__nav" aria-label="Sections">
             <Link href="/">xStocks</Link>
             <Link href="/prestocks" aria-current="page">PreStocks</Link>
+            <Link href="/tessera">Tessera</Link>
           </nav>
         </header>
 

@@ -430,6 +430,23 @@ export interface JupiterPriceCheck {
   error: string | null;
 }
 
+export async function getJupiterPriceChecks(
+  mints: readonly string[],
+): Promise<Map<string, JupiterPriceCheck>> {
+  const result = await fetchJupiterPrices(mints);
+  return new Map(
+    mints.map((mint) => {
+      const entry = result.value[mint];
+      return [mint, {
+        price: finiteNumber(entry?.usdPrice),
+        blockId: entry?.blockId ?? null,
+        decimals: entry?.decimals ?? null,
+        error: result.error ?? (entry ? null : "Jupiter Price v3 returned no price for this mint"),
+      }];
+    }),
+  );
+}
+
 export async function getJupiterPrice(mint: string): Promise<JupiterPriceCheck> {
   const result = await fetchJupiterPrices([mint]);
   const entry = result.value[mint];

@@ -51,7 +51,7 @@ export function decideExecutionGate(input: GateInput): GateDecision {
   if (absolutePremium > 2) {
     return {
       gate: "overpay",
-      reason: "The token is more than 2% away from its stock reference.",
+      reason: "The token is more than 2% away from its reference price.",
       exceedsDepth: false,
     };
   }
@@ -62,7 +62,7 @@ export function decideExecutionGate(input: GateInput): GateDecision {
       gate: "caution",
       reason: usesMostDepth
         ? "The order uses at least 60% of the measured route depth."
-        : "The token is between 0.5% and 2% away from its stock reference.",
+        : "The token is between 0.5% and 2% away from its reference price.",
       exceedsDepth: false,
     };
   }
