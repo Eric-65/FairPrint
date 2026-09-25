@@ -6,7 +6,7 @@ import { TesseraWatchlist } from "@/components/tessera-watchlist";
 export const metadata: Metadata = {
   title: "Tessera T-Token watch — FairPrint",
   description:
-    "Live premium, executable depth, and the lowest-priced route to OpenAI, Kalshi, and SpaceX exposure for Tessera T-Tokens on Solana.",
+    "Live premium to Tessera's own mark, market-implied valuation, and executable depth for Tessera T-Tokens on Solana.",
   twitter: { card: "summary_large_image" },
 };
 
@@ -53,9 +53,9 @@ export default function TesseraPage() {
               or an independent oracle.
             </p>
             <p>
-              <strong>Lowest-priced route</strong>
-              Each live price converted into the company valuation it implies, so a T-Token can be compared with the
-              same company&apos;s token on another venue.
+              <strong>Market-implied valuation</strong>
+              Each live price converted into the company valuation it implies, set against the valuation Tessera
+              publishes for the same company.
             </p>
           </div>
         </aside>

@@ -8,7 +8,7 @@ export async function generateMetadata(
   const { symbol } = await props.params;
   return {
     title: `${symbol} trade check — FairPrint Tessera`,
-    description: `Measure ${symbol}'s premium, executable depth, and lowest-priced route before trading.`,
+    description: `Measure ${symbol}'s premium, market-implied valuation, and executable depth before trading.`,
   };
 }
 

@@ -1,4 +1,3 @@
-import type { RouteTrackRecord } from "./archive";
 import type { ExecutionGate } from "./gate";
 import type { TesseraSnapshot } from "./tessera";
 
@@ -14,7 +13,6 @@ export interface TesseraWatchlistEntry {
   depth: TesseraDepth;
   gate: ExecutionGate;
   gateReason: string;
-  trackRecord: RouteTrackRecord | null;
 }
 
 export interface TesseraWatchlistResponse {
@@ -22,5 +20,4 @@ export interface TesseraWatchlistResponse {
   fetchedAt: string;
   retryAfterSeconds: number;
   archiveDegradedReason: string | null;
-  comparisonError: string | null;
 }
