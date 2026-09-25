@@ -58,6 +58,14 @@ Depth-aware execution gate with relative reference freshness. This real INTCx me
 
 FairPrint never labels an on-chain swap price as an official stock print and never replaces a missing feed with a guessed value.
 
+## For agents
+
+FairPrint is also a tool for autonomous agents that trade tokenized stocks.
+
+- `GET /api/agent/check?symbol=TSLAx&notional=1000` returns one verdict (`fair`, `caution`, `overpay`, `halted`, `unavailable`), a `proceed` flag, and the premium, 1% depth and all-in cost behind it.
+- `/skill.md` is a skill file any agent runtime can load: when to call the check and how to act on each verdict.
+- `/agent` is the FairPrint Agent: a Stocknized agent token launched through Clawpump into a Meteora pool quoted in TSLAx. The page prices the token in TSLAx, values it at both the on-chain xStock price and the real share price, and shows pool liquidity, holders and 1% depth. Set `AGENT_TOKEN_MINT` (and optionally `AGENT_POOL_ADDRESS`, `CLAWPUMP_AGENT_URL`, `AGENT_QUOTE_SYMBOL`) after launch.
+
 ## Quick start
 
 Requirements: Node.js 22+, PostgreSQL, and npm.

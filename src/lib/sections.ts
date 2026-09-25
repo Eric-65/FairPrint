@@ -1,17 +1,19 @@
-export type Section = "xstocks" | "prestocks" | "tessera";
+export type Section = "xstocks" | "prestocks" | "tessera" | "agent";
 
-const ALL_SECTIONS: readonly Section[] = ["xstocks", "prestocks", "tessera"];
+const ALL_SECTIONS: readonly Section[] = ["xstocks", "prestocks", "tessera", "agent"];
 
 export const SECTION_HOME: Record<Section, string> = {
   xstocks: "/",
   prestocks: "/prestocks",
   tessera: "/tessera",
+  agent: "/agent",
 };
 
 export const SECTION_LABEL: Record<Section, string> = {
   xstocks: "xStocks",
   prestocks: "PreStocks",
   tessera: "Tessera",
+  agent: "Agent",
 };
 
 function isSection(value: string): value is Section {
@@ -38,5 +40,6 @@ export function sectionForPath(pathname: string): Section | null {
   if (pathname === "/tessera" || pathname.startsWith("/tessera/") || pathname.startsWith("/api/tessera")) {
     return "tessera";
   }
+  if (pathname === "/agent" || pathname.startsWith("/api/agent") || pathname === "/skill.md") return "agent";
   return null;
 }

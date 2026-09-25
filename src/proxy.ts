@@ -31,5 +31,8 @@ export const config = {
     "/api/market/:path*",
     "/api/prestocks/:path*",
     "/api/tessera/:path*",
+    "/agent",
+    "/api/agent/:path*",
+    "/skill.md",
   ],
 };
