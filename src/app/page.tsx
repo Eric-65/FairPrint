@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { SectionNav } from "@/components/section-nav";
 import { AnimatedHero } from "@/components/animated-hero";
 import { Watchlist } from "@/components/ticker-row";
 import { TRACKED_ASSETS } from "@/lib/tracked-assets";
@@ -22,11 +22,7 @@ export default function HomePage() {
             FairPrint
           </a>
           <span className="tagline">Know what you&apos;re actually paying.</span>
-          <nav className="site-head__nav" aria-label="Sections">
-            <Link href="/" aria-current="page">xStocks</Link>
-            <Link href="/prestocks">PreStocks</Link>
-            <Link href="/tessera">Tessera</Link>
-          </nav>
+          <SectionNav current="xstocks" />
         </header>
 
         <AnimatedHero />

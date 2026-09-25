@@ -125,7 +125,7 @@ function CheapestRoute({ snapshot, trackRecord, comparisonDepth, tesseraDepth, n
     return (
       <section className="confidence-band" aria-labelledby="tessera-route-title">
         <div>
-          <h2 id="tessera-route-title">Cheapest route to {token.company}</h2>
+          <h2 id="tessera-route-title">Lowest-priced route to {token.company}</h2>
           <p>{token.symbol} is the only tokenized {token.company} exposure FairPrint tracks, so there is no other venue to compare.</p>
         </div>
       </section>
@@ -140,24 +140,24 @@ function CheapestRoute({ snapshot, trackRecord, comparisonDepth, tesseraDepth, n
     : Math.abs(tesseraDiscountPct) < 0.05
       ? `Both tokens price ${token.company} the same at live prices.`
       : tesseraCheaper
-        ? `${token.symbol} is ${tesseraDiscountPct.toFixed(1)}% cheaper exposure to ${token.company} than PreStocks' ${prestocks.symbol}.`
+        ? `${token.symbol} implies a ${tesseraDiscountPct.toFixed(1)}% lower ${token.company} valuation than PreStocks' ${prestocks.symbol}, by each venue's own marks.`
         : `${token.symbol} is ${Math.abs(tesseraDiscountPct).toFixed(1)}% more expensive exposure to ${token.company} than PreStocks' ${prestocks.symbol}.`;
   const sizeCaveat = tesseraDiscountPct !== null && cheaperDepth !== null && cheaperDepth < notional
-    ? ` At $${notional.toLocaleString("en-US")}, though, the cheaper route can only absorb about ${compactDollars(cheaperDepth)} before 1% price impact.`
+    ? ` At $${notional.toLocaleString("en-US")}, though, the lower-priced route can only absorb about ${compactDollars(cheaperDepth)} before 1% price impact.`
     : "";
 
   return (
     <section className="cheapest-route" aria-labelledby="tessera-route-title" data-winner={tesseraCheaper ? "tessera" : "other"}>
-      <h2 id="tessera-route-title">Cheapest route to {token.company}</h2>
+      <h2 id="tessera-route-title">Lowest-priced route to {token.company}</h2>
       <p className="cheapest-route__verdict">{verdict}{sizeCaveat}</p>
       <p className="cheapest-route__track">
         {trackRecord && trackRecord.readings > 0
-          ? `Over the last 7 days of archived minute readings (since ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(trackRecord.firstObservedAt))}), ${token.symbol} was the cheaper route in ${Math.round(trackRecord.pctTesseraCheaper)}% of ${trackRecord.readings.toLocaleString("en-US")} readings, ${trackRecord.discountMaxPct - trackRecord.discountMinPct < 0.1 ? `consistently ${trackRecord.discountMeanPct.toFixed(1)}%` : `ranging from ${trackRecord.discountMinPct.toFixed(1)}% to ${trackRecord.discountMaxPct.toFixed(1)}%`} below PreStocks.`
+          ? `Over the last 7 days of archived minute readings (since ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(trackRecord.firstObservedAt))}), ${token.symbol} implied the lower valuation in ${Math.round(trackRecord.pctTesseraCheaper)}% of ${trackRecord.readings.toLocaleString("en-US")} readings, ${trackRecord.discountMaxPct - trackRecord.discountMinPct < 0.1 ? `consistently ${trackRecord.discountMeanPct.toFixed(1)}%` : `ranging from ${trackRecord.discountMinPct.toFixed(1)}% to ${trackRecord.discountMaxPct.toFixed(1)}%`} below PreStocks.`
           : "The track record starts with the next archived minute reading."}
       </p>
       <div className="cheapest-route__venues">
         <div data-lead={tesseraCheaper}>
-          <span>{token.symbol} · Tessera{tesseraCheaper ? " · cheaper route" : ""}</span>
+          <span>{token.symbol} · Tessera{tesseraCheaper ? " · lower-priced" : ""}</span>
           <strong>{compactValuation(snapshot.impliedValuation)}</strong>
           <small>
             {token.company} valuation implied by the live price{snapshot.onchainPrice !== null ? ` of $${snapshot.onchainPrice.toFixed(2)}` : ""}
@@ -165,7 +165,7 @@ function CheapestRoute({ snapshot, trackRecord, comparisonDepth, tesseraDepth, n
           </small>
         </div>
         <div data-lead={tesseraDiscountPct !== null && !tesseraCheaper}>
-          <span>{prestocks.symbol} · PreStocks{tesseraDiscountPct !== null && !tesseraCheaper ? " · cheaper route" : ""}</span>
+          <span>{prestocks.symbol} · PreStocks{tesseraDiscountPct !== null && !tesseraCheaper ? " · lower-priced" : ""}</span>
           <strong>{compactValuation(prestocks.impliedValuation)}</strong>
           <small>
             {token.company} valuation implied by the live price{prestocks.livePrice !== null ? ` of $${prestocks.livePrice.toFixed(2)}` : ""}
@@ -177,7 +177,8 @@ function CheapestRoute({ snapshot, trackRecord, comparisonDepth, tesseraDepth, n
         Each venue splits {token.company}{" "}
         into different-sized tokens, so token prices aren&apos;t comparable. FairPrint
         converts each live price into the company valuation it implies (live price ÷ mark price × mark valuation);
-        the lower valuation is the cheaper way in. Prices: Jupiter Price v3
+        the lower valuation is the lower-priced way in. The marks are each venue&apos;s own figures, and the tokens are
+        different instruments: T-Tokens are loan participation rights, PreStocks tokens are SPV exposure. Prices: Jupiter Price v3
         {prestocks.priceSource === "PreStocks tokenPrice" ? `, with PreStocks' own tokenPrice for ${prestocks.symbol} because Jupiter had no price` : ""}.
       </p>
     </section>
@@ -400,8 +401,8 @@ export function TesseraPanel({ symbol }: { symbol: string }) {
           <p>{decision.reason}</p>
           {decision.gate === "overpay" && discount !== null && discount > 0.05 && snapshot.comparison ? (
             <p>
-              Measured against Tessera&apos;s own mark. It is still the cheapest on-chain route to {token.company}:{" "}
-              {discount.toFixed(1)}% below PreStocks&apos; {snapshot.comparison.prestocks.symbol}.
+              Measured against Tessera&apos;s own mark. It still implies the lower {token.company} valuation of the two tracked routes:{" "}
+              {discount.toFixed(1)}% below PreStocks&apos; {snapshot.comparison.prestocks.symbol}, by each venue&apos;s own marks.
             </p>
           ) : null}
         </div>
@@ -428,7 +429,7 @@ export function TesseraPanel({ symbol }: { symbol: string }) {
             {decision.gate === "caution" && cost
               ? `Swap anyway — this costs about $${Math.abs(cost.allInUsd).toFixed(2)} versus the Tessera mark`
               : discount !== null && discount > 0.05
-                ? `Buy ${token.symbol} — ${discount.toFixed(1)}% cheaper ${token.company} exposure than PreStocks`
+                ? `Buy ${token.symbol} — ${discount.toFixed(1)}% lower implied valuation than PreStocks`
                 : `Continue with ${token.symbol}`}
           </a>
         )}

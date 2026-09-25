@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 import { getTesseraSnapshots, type TesseraSnapshot } from "@/lib/tessera";
 
-export const alt = "The cheapest on-chain route to OpenAI, Kalshi and SpaceX, measured live by FairPrint";
+export const alt = "The lowest-priced on-chain route to OpenAI, Kalshi and SpaceX, measured live by FairPrint";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 export const revalidate = 600;
@@ -36,7 +36,7 @@ export default async function Image() {
         <div style={{ display: "flex", fontSize: 26, fontWeight: 700, color: MUTED }}>FairPrint · Tessera T-Tokens</div>
         <div style={{ display: "flex", marginTop: 20, fontSize: 50, lineHeight: 1.1, letterSpacing: -1.5 }}>
           {winners.length > 0
-            ? `The cheapest on-chain way to own ${listOf(winners.map((snapshot) => snapshot.token.company))} is Tessera.`
+            ? `The lowest-priced on-chain route to ${listOf(winners.map((snapshot) => snapshot.token.company))} is Tessera.`
             : "Know what you're actually paying for pre-IPO exposure."}
         </div>
         <div style={{ display: "flex", marginTop: "auto", gap: 20 }}>
@@ -57,15 +57,15 @@ export default async function Image() {
               >
                 <div style={{ display: "flex", fontSize: 28, fontWeight: 700 }}>{snapshot.token.company}</div>
                 <div style={{ display: "flex", fontSize: 40, whiteSpace: "nowrap", color: cheaper ? FAIR : INK }}>
-                  {`${Math.abs(discount).toFixed(1)}% ${cheaper ? "cheaper" : "pricier"}`}
+                  {`${Math.abs(discount).toFixed(1)}% ${cheaper ? "lower" : "higher"}`}
                 </div>
-                <div style={{ display: "flex", fontSize: 20, color: MUTED }}>{`${snapshot.token.symbol} vs PreStocks ${snapshot.comparison!.prestocks.symbol}`}</div>
+                <div style={{ display: "flex", fontSize: 20, color: MUTED }}>{`implied valuation, ${snapshot.token.symbol} vs PreStocks ${snapshot.comparison!.prestocks.symbol}`}</div>
               </div>
             );
           })}
         </div>
         <div style={{ display: "flex", marginTop: 24, fontSize: 20, color: MUTED }}>
-          Company valuation implied by each live token price · Jupiter Price v3 · Not investment advice
+          {"Company valuation implied by each live token price, using each venue's own marks · Not investment advice"}
         </div>
       </div>
     ),
