@@ -45,7 +45,7 @@ function routeSummary(snapshot: TesseraSnapshot) {
   if (discount === null) return `vs PreStocks ${comparison.prestocks.symbol}: price missing`;
   if (Math.abs(discount) < 0.05) return `Same price as PreStocks ${comparison.prestocks.symbol}`;
   return discount > 0
-    ? `${discount.toFixed(1)}% cheaper than PreStocks ${comparison.prestocks.symbol}`
+    ? `${discount.toFixed(1)}% lower implied valuation than PreStocks ${comparison.prestocks.symbol}`
     : `${Math.abs(discount).toFixed(1)}% pricier than PreStocks ${comparison.prestocks.symbol}`;
 }
 
@@ -84,7 +84,7 @@ function TrackRecordLine({ entry }: { entry: TesseraWatchlistEntry }) {
   }
   return (
     <small>
-      Cheaper in {Math.round(record.pctTesseraCheaper)}% of {record.readings.toLocaleString("en-US")} readings since{" "}
+      Lower in {Math.round(record.pctTesseraCheaper)}% of {record.readings.toLocaleString("en-US")} readings since{" "}
       {shortDate(record.firstObservedAt)} · average {record.discountMeanPct >= 0 ? "" : "−"}
       {Math.abs(record.discountMeanPct).toFixed(1)}% {record.discountMeanPct >= 0 ? "below" : "above"} PreStocks
     </small>
@@ -107,18 +107,18 @@ function RouteHero({ entries, fetching }: { entries: TesseraWatchlistEntry[]; fe
 
   return (
     <section className="route-hero" aria-labelledby="route-hero-title" data-refreshing={fetching}>
-      <p className="route-hero__eyebrow">Cheapest on-chain route, measured live</p>
+      <p className="route-hero__eyebrow">Lowest implied valuation, measured live</p>
       {winners.length > 0 ? (
         <>
           <h2 id="route-hero-title">
-            The cheapest way to own {listOf(winnerNames)} on-chain is Tessera.
+            The lowest-priced on-chain route to {listOf(winnerNames)} is Tessera.
           </h2>
           <p className="route-hero__lede">
-            Right now T-Tokens price {winners.length === 1 ? "it" : "these companies"} {range} below the same{" "}
-            {winners.length === 1 ? "company's" : "companies'"} PreStocks tokens, measured as the company valuation each
-            live price implies.
+            At live prices, T-Tokens imply a {range} lower company valuation than the same{" "}
+            {winners.length === 1 ? "company's" : "companies'"} PreStocks tokens, using each venue&apos;s own mark price
+            and valuation.
             {losers.length > 0
-              ? ` PreStocks is currently cheaper for ${listOf(losers.map((entry) => entry.snapshot.token.company))}.`
+              ? ` PreStocks currently implies the lower valuation for ${listOf(losers.map((entry) => entry.snapshot.token.company))}.`
               : ""}
           </p>
         </>
@@ -141,9 +141,9 @@ function RouteHero({ entries, fetching }: { entries: TesseraWatchlistEntry[]; fe
             >
               <span className="route-card__company">{snapshot.token.company}</span>
               <strong className="route-card__figure">
-                {Math.abs(discount).toFixed(1)}% {cheaper ? "cheaper" : discount < -0.05 ? "pricier" : "same"}
+                {Math.abs(discount).toFixed(1)}% {cheaper ? "lower" : discount < -0.05 ? "higher" : "same"}
               </strong>
-              <span className="route-card__label">on Tessera than on PreStocks</span>
+              <span className="route-card__label">implied valuation on Tessera than on PreStocks, by each venue&apos;s own marks</span>
               <dl>
                 <div>
                   <dt>{snapshot.token.symbol}</dt>
@@ -257,7 +257,7 @@ export function TesseraWatchlist() {
       </div>
       <p className="watchlist-note">
         Sorted by absolute premium to Tessera&apos;s mark. Live prices come from Jupiter Price v3; Tessera publishes no
-        timestamp for its mark. &ldquo;Cheaper&rdquo; compares the company valuation each live token price implies.
+        timestamp for its mark. &ldquo;Lower&rdquo; compares the company valuation each live token price implies, using each venue&apos;s own marks.
         {data.comparisonError ? ` PreStocks comparison unavailable: ${data.comparisonError}.` : ""}
       </p>
     </div>

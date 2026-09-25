@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SectionNav } from "@/components/section-nav";
 import { TesseraWatchlist } from "@/components/tessera-watchlist";
 
 export const metadata: Metadata = {
   title: "Tessera T-Token watch — FairPrint",
   description:
-    "Live premium, executable depth, and the cheapest route to OpenAI, Kalshi, and SpaceX exposure for Tessera T-Tokens on Solana.",
+    "Live premium, executable depth, and the lowest-priced route to OpenAI, Kalshi, and SpaceX exposure for Tessera T-Tokens on Solana.",
   twitter: { card: "summary_large_image" },
 };
 
@@ -28,11 +29,7 @@ export default function TesseraPage() {
             FairPrint
           </Link>
           <span className="tagline">Know what you&apos;re actually paying.</span>
-          <nav className="site-head__nav" aria-label="Sections">
-            <Link href="/">xStocks</Link>
-            <Link href="/prestocks">PreStocks</Link>
-            <Link href="/tessera" aria-current="page">Tessera</Link>
-          </nav>
+          <SectionNav current="tessera" />
         </header>
 
         <section className="watchlist" aria-labelledby="tessera-watchlist-title">
@@ -56,7 +53,7 @@ export default function TesseraPage() {
               or an independent oracle.
             </p>
             <p>
-              <strong>Cheapest route</strong>
+              <strong>Lowest-priced route</strong>
               Each live price converted into the company valuation it implies, so a T-Token can be compared with the
               same company&apos;s token on another venue.
             </p>

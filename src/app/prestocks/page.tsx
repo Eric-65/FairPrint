@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SectionNav } from "@/components/section-nav";
 import { PreStocksWatchlist } from "@/components/prestocks-watchlist";
 
 export const metadata: Metadata = {
@@ -27,11 +28,7 @@ export default function PreStocksPage() {
             FairPrint
           </Link>
           <span className="tagline">Know what you&apos;re actually paying.</span>
-          <nav className="site-head__nav" aria-label="Sections">
-            <Link href="/">xStocks</Link>
-            <Link href="/prestocks" aria-current="page">PreStocks</Link>
-            <Link href="/tessera">Tessera</Link>
-          </nav>
+          <SectionNav current="prestocks" />
         </header>
 
         <section className="watchlist" aria-labelledby="prestocks-watchlist-title">
