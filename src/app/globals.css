@@ -2118,3 +2118,121 @@ p {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* FairPrint Agent */
+.agent-mint {
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-links {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--rule-color);
+  list-style: none;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.agent-links a {
+  color: var(--text-color);
+  text-decoration-color: var(--fair);
+  text-underline-offset: 0.22em;
+}
+
+.agent-check {
+  --state-color: var(--graphite);
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.agent-check[data-state="fair"] { --state-color: var(--fair); }
+.agent-check[data-state="caution"] { --state-color: var(--caution); }
+.agent-check[data-state="overpay"],
+.agent-check[data-state="halted"] { --state-color: var(--overpay); }
+
+.agent-check__inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.agent-check__inputs label {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+}
+
+.agent-check__inputs select,
+.agent-check__inputs input {
+  min-width: 9rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--strong-rule);
+  background: var(--panel-color);
+  color: var(--text-color);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.agent-check__request {
+  overflow-x: auto;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--rule-color);
+  background: var(--panel-color);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.agent-check .execution-gate[data-refreshing="true"] {
+  opacity: 0.85;
+}
+
+.agent-check__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.6rem 1.5rem;
+  margin: 0;
+}
+
+.agent-check__fields div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.agent-check__fields dt {
+  color: var(--muted-color);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem;
+}
+
+.agent-check__fields dd {
+  margin: 0;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 720;
+}
+
+.agent-check__skill {
+  color: var(--muted-color);
+  font-size: 0.8125rem;
+}
+
+.agent-check__skill a {
+  color: var(--text-color);
+  font-weight: 700;
+  text-decoration-color: var(--fair);
+  text-underline-offset: 0.22em;
+  word-break: break-all;
+}
+
+@media (max-width: 46rem) {
+  .agent-check .execution-gate {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+}

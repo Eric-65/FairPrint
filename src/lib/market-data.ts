@@ -7,6 +7,13 @@ const JUPITER_HOST = process.env[JUPITER_KEY_NAME]
   : "https://lite-api.jup.ag";
 export const JUPITER_PRICE_URL = `${JUPITER_HOST}/price/v3`;
 export const JUPITER_QUOTE_URL = `${JUPITER_HOST}/swap/v1/quote`;
+export const JUPITER_TOKENS_URL = `${JUPITER_HOST}/tokens/v2/search`;
+
+export function jupiterHeaders(): Record<string, string> {
+  const apiKey = process.env[JUPITER_KEY_NAME];
+  return apiKey ? { accept: "application/json", "x-api-key": apiKey } : { accept: "application/json" };
+}
+
 const HERMES_BASE_URL = "https://hermes.pyth.network";
 const REQUEST_TIMEOUT_MS = 8_000;
 const PYTH_KEY_NAME = ["PYTH", "API", "KEY"].join("_");
