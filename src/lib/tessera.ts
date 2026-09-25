@@ -1,7 +1,6 @@
 import "server-only";
 
 import { getJupiterPriceChecks } from "./market-data";
-import { getCachedPreStocksAssets, type PreStocksAsset } from "./prestocks";
 
 const TESSERA_API_URL = "https://rest-api.tessera.pe/v1/public/token-details";
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -31,22 +30,6 @@ export interface TesseraToken {
   fetchedAt: string;
 }
 
-export interface VenueValuation {
-  symbol: string;
-  livePrice: number | null;
-  priceSource: "Jupiter Price v3" | "PreStocks tokenPrice" | null;
-  markPrice: number | null;
-  markValuation: number | null;
-  // The company valuation implied by paying livePrice for one token.
-  impliedValuation: number | null;
-}
-
-export interface TesseraComparison {
-  prestocks: VenueValuation;
-  // Positive when the T-Token prices the company lower, i.e. cheaper exposure.
-  tesseraDiscountPct: number | null;
-}
-
 export interface TesseraSnapshot {
   token: TesseraToken;
   onchainPrice: number | null;
@@ -54,7 +37,6 @@ export interface TesseraSnapshot {
   impliedValuation: number | null;
   jupiterBlockId: number | null;
   tokenDecimals: number | null;
-  comparison: TesseraComparison | null;
   degradedReason: string | null;
 }
 
@@ -69,11 +51,6 @@ declare global {
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-// "T-OpenAI" and PreStocks' "OPENAI" both key to "openai".
-function companyKey(symbol: string) {
-  return symbol.replace(/^t-/i, "").toLowerCase();
 }
 
 function parseToken(raw: TesseraApiToken, fetchedAt: string): TesseraToken | null {
@@ -151,56 +128,15 @@ function impliedValuation(price: number | null, markPrice: number | null, markVa
     : null;
 }
 
-function preStocksValuation(
-  asset: PreStocksAsset,
-  jupiterPrice: number | null,
-): VenueValuation {
-  const livePrice = jupiterPrice ?? asset.tokenPrice;
-  return {
-    symbol: asset.symbol,
-    livePrice,
-    priceSource: jupiterPrice !== null
-      ? "Jupiter Price v3"
-      : asset.tokenPrice !== null
-        ? "PreStocks tokenPrice"
-        : null,
-    markPrice: asset.markPrice,
-    markValuation: asset.markValuation,
-    impliedValuation: impliedValuation(livePrice, asset.markPrice, asset.markValuation),
-  };
-}
-
-export async function getTesseraSnapshots(): Promise<{
-  snapshots: TesseraSnapshot[];
-  comparisonError: string | null;
-}> {
+export async function getTesseraSnapshots(): Promise<TesseraSnapshot[]> {
   const tokens = await getCachedTesseraTokens();
-  const preStocks = await getCachedPreStocksAssets().then(
-    (assets) => ({ assets, error: null as string | null }),
-    (error: unknown) => ({
-      assets: [] as PreStocksAsset[],
-      error: error instanceof Error ? error.message : "PreStocks fetch failed",
-    }),
-  );
-  const preStocksByCompany = new Map(
-    preStocks.assets.map((asset) => [companyKey(asset.symbol), asset]),
-  );
-  const matched = tokens.map((token) => preStocksByCompany.get(companyKey(token.symbol)) ?? null);
-  const prices = await getJupiterPriceChecks([
-    ...tokens.map((token) => token.mint),
-    ...matched.flatMap((asset) => (asset ? [asset.mint] : [])),
-  ]);
+  const prices = await getJupiterPriceChecks(tokens.map((token) => token.mint));
 
-  const snapshots = tokens.map((token, index) => {
+  return tokens.map((token) => {
     const price = prices.get(token.mint);
     const onchainPrice = price?.price ?? null;
     const premiumPct = onchainPrice !== null && token.markPrice !== null
       ? ((onchainPrice - token.markPrice) / token.markPrice) * 100
-      : null;
-    const tesseraImplied = impliedValuation(onchainPrice, token.markPrice, token.markValuation);
-    const preStocksAsset = matched[index];
-    const prestocks = preStocksAsset
-      ? preStocksValuation(preStocksAsset, prices.get(preStocksAsset.mint)?.price ?? null)
       : null;
     const degraded: string[] = [];
     if (token.markPrice === null) degraded.push("Tessera did not publish a usable markPrice");
@@ -210,26 +146,15 @@ export async function getTesseraSnapshots(): Promise<{
       token,
       onchainPrice,
       premiumPct,
-      impliedValuation: tesseraImplied,
+      impliedValuation: impliedValuation(onchainPrice, token.markPrice, token.markValuation),
       jupiterBlockId: price?.blockId ?? null,
       tokenDecimals: price?.decimals ?? null,
-      comparison: prestocks
-        ? {
-            prestocks,
-            tesseraDiscountPct:
-              tesseraImplied !== null && prestocks.impliedValuation !== null
-                ? ((prestocks.impliedValuation - tesseraImplied) / prestocks.impliedValuation) * 100
-                : null,
-          }
-        : null,
       degradedReason: degraded.length ? degraded.join("; ") : null,
     };
   });
-
-  return { snapshots, comparisonError: preStocks.error };
 }
 
 export async function findTesseraSnapshot(symbol: string) {
-  const { snapshots } = await getTesseraSnapshots();
+  const snapshots = await getTesseraSnapshots();
   return snapshots.find((snapshot) => snapshot.token.symbol.toLowerCase() === symbol.toLowerCase()) ?? null;
 }

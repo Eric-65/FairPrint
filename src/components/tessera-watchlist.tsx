@@ -38,15 +38,9 @@ function compactDollars(value: number | null) {
   return `$${Math.floor(value).toLocaleString("en-US")}`;
 }
 
-function routeSummary(snapshot: TesseraSnapshot) {
-  const comparison = snapshot.comparison;
-  if (!comparison) return `Only tokenized ${snapshot.token.company} route tracked`;
-  const discount = comparison.tesseraDiscountPct;
-  if (discount === null) return `vs PreStocks ${comparison.prestocks.symbol}: price missing`;
-  if (Math.abs(discount) < 0.05) return `Same price as PreStocks ${comparison.prestocks.symbol}`;
-  return discount > 0
-    ? `${discount.toFixed(1)}% lower implied valuation than PreStocks ${comparison.prestocks.symbol}`
-    : `${Math.abs(discount).toFixed(1)}% pricier than PreStocks ${comparison.prestocks.symbol}`;
+function holdersSummary(snapshot: TesseraSnapshot) {
+  const { holders } = snapshot.token;
+  return holders === null ? "Holders not published" : `${holders.toLocaleString("en-US")} holders`;
 }
 
 function LoadingRows() {
@@ -69,96 +63,61 @@ function listOf(names: string[]) {
   return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
-function discountOf(entry: TesseraWatchlistEntry) {
-  return entry.snapshot.comparison?.tesseraDiscountPct ?? null;
-}
-
-function shortDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value));
-}
-
-function TrackRecordLine({ entry }: { entry: TesseraWatchlistEntry }) {
-  const record = entry.trackRecord;
-  if (!record || record.readings === 0) {
-    return <small>Track record starts with the next minute&apos;s archived reading.</small>;
-  }
-  return (
-    <small>
-      Lower in {Math.round(record.pctTesseraCheaper)}% of {record.readings.toLocaleString("en-US")} readings since{" "}
-      {shortDate(record.firstObservedAt)} · average {record.discountMeanPct >= 0 ? "" : "−"}
-      {Math.abs(record.discountMeanPct).toFixed(1)}% {record.discountMeanPct >= 0 ? "below" : "above"} PreStocks
-    </small>
-  );
+function premiumOf(entry: TesseraWatchlistEntry) {
+  return entry.snapshot.premiumPct;
 }
 
 function RouteHero({ entries, fetching }: { entries: TesseraWatchlistEntry[]; fetching: boolean }) {
-  const compared = entries
-    .filter((entry) => discountOf(entry) !== null)
-    .sort((a, b) => (discountOf(b) ?? 0) - (discountOf(a) ?? 0));
-  const winners = compared.filter((entry) => (discountOf(entry) ?? 0) > 0.05);
-  const losers = compared.filter((entry) => (discountOf(entry) ?? 0) < -0.05);
-  const winnerNames = winners.map((entry) => entry.snapshot.token.company);
-  const discounts = winners.map((entry) => discountOf(entry)!);
-  const low = Math.min(...discounts);
-  const high = Math.max(...discounts);
-  const range = winners.length === 1 || high - low < 0.5
-    ? `${high.toFixed(0)}%`
-    : `${low.toFixed(0)}–${high.toFixed(0)}%`;
+  const measured = entries
+    .filter((entry) => premiumOf(entry) !== null)
+    .sort((a, b) => premiumOf(a)! - premiumOf(b)!);
+  const below = measured.filter((entry) => premiumOf(entry)! < -0.05);
+  const companies = (list: TesseraWatchlistEntry[]) => listOf(list.map((entry) => entry.snapshot.token.company));
 
   return (
     <section className="route-hero" aria-labelledby="route-hero-title" data-refreshing={fetching}>
-      <p className="route-hero__eyebrow">Lowest implied valuation, measured live</p>
-      {winners.length > 0 ? (
-        <>
-          <h2 id="route-hero-title">
-            The lowest-priced on-chain route to {listOf(winnerNames)} is Tessera.
-          </h2>
-          <p className="route-hero__lede">
-            At live prices, T-Tokens imply a {range} lower company valuation than the same{" "}
-            {winners.length === 1 ? "company's" : "companies'"} PreStocks tokens, using each venue&apos;s own mark price
-            and valuation.
-            {losers.length > 0
-              ? ` PreStocks currently implies the lower valuation for ${listOf(losers.map((entry) => entry.snapshot.token.company))}.`
-              : ""}
-          </p>
-        </>
-      ) : (
-        <h2 id="route-hero-title">How Tessera compares for {listOf(compared.map((entry) => entry.snapshot.token.company))}</h2>
-      )}
+      <p className="route-hero__eyebrow">Market price vs Tessera&apos;s own valuation, measured live</p>
+      <h2 id="route-hero-title">
+        {below.length > 0
+          ? `The market prices ${companies(below)} below Tessera's own valuation.`
+          : `What the market pays for ${companies(measured)} on Tessera.`}
+      </h2>
+      <p className="route-hero__lede">
+        FairPrint turns each T-Token&apos;s live Solana price into the company valuation it implies and sets it against
+        the valuation Tessera publishes, alongside the size you can actually trade before 1% price impact.
+      </p>
 
       <div className="route-cards">
-        {compared.map((entry) => {
+        {measured.map((entry) => {
           const { snapshot } = entry;
-          const discount = discountOf(entry)!;
-          const cheaper = discount > 0.05;
-          const prestocks = snapshot.comparison!.prestocks;
+          const premium = premiumOf(entry)!;
+          const belowMark = premium < -0.05;
           return (
             <a
               className="route-card"
-              data-cheaper={cheaper}
+              data-below={belowMark}
               href={`/tessera/${encodeURIComponent(snapshot.token.symbol)}`}
               key={snapshot.token.symbol}
             >
               <span className="route-card__company">{snapshot.token.company}</span>
               <strong className="route-card__figure">
-                {Math.abs(discount).toFixed(1)}% {cheaper ? "lower" : discount < -0.05 ? "higher" : "same"}
+                {Math.abs(premium).toFixed(1)}% {belowMark ? "below" : premium > 0.05 ? "above" : "at"}
               </strong>
-              <span className="route-card__label">implied valuation on Tessera than on PreStocks, by each venue&apos;s own marks</span>
+              <span className="route-card__label">Tessera&apos;s own valuation, at the live {snapshot.token.symbol} price</span>
               <dl>
                 <div>
-                  <dt>{snapshot.token.symbol}</dt>
+                  <dt>Market-implied valuation</dt>
                   <dd>{compactValuation(snapshot.impliedValuation)}</dd>
                 </div>
                 <div>
-                  <dt>PreStocks {prestocks.symbol}</dt>
-                  <dd>{compactValuation(prestocks.impliedValuation)}</dd>
+                  <dt>Tessera valuation</dt>
+                  <dd>{compactValuation(snapshot.token.markValuation)}</dd>
                 </div>
                 <div>
-                  <dt>{snapshot.token.symbol} depth at 1%</dt>
+                  <dt>Depth at 1%</dt>
                   <dd>{compactDollars(entry.depth.maxFillableUsd)}</dd>
                 </div>
               </dl>
-              <TrackRecordLine entry={entry} />
               <span className="route-card__cta">Check {snapshot.token.symbol} before trading</span>
             </a>
           );
@@ -205,7 +164,7 @@ function WatchRow({ entry }: { entry: TesseraWatchlistEntry }) {
         {dangerousDepth && <em>Size danger</em>}
       </span>
       <span className="watch-row__status">
-        <small>{routeSummary(snapshot)}</small>
+        <small>{holdersSummary(snapshot)}</small>
       </span>
     </a>
   );
@@ -257,8 +216,7 @@ export function TesseraWatchlist() {
       </div>
       <p className="watchlist-note">
         Sorted by absolute premium to Tessera&apos;s mark. Live prices come from Jupiter Price v3; Tessera publishes no
-        timestamp for its mark. &ldquo;Lower&rdquo; compares the company valuation each live token price implies, using each venue&apos;s own marks.
-        {data.comparisonError ? ` PreStocks comparison unavailable: ${data.comparisonError}.` : ""}
+        timestamp for its mark. Market-implied valuation is live price ÷ mark price × Tessera&apos;s valuation.
       </p>
     </div>
   );

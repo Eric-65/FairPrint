@@ -1086,7 +1086,7 @@ p {
   text-decoration: none;
 }
 
-.route-card[data-cheaper="true"] {
+.route-card[data-below="true"] {
   border-top-color: var(--fair);
 }
 
@@ -1112,7 +1112,7 @@ p {
   line-height: 1.1;
 }
 
-.route-card[data-cheaper="true"] .route-card__figure {
+.route-card[data-below="true"] .route-card__figure {
   color: color-mix(in oklch, var(--fair) 80%, var(--text-color));
 }
 
@@ -1162,38 +1162,32 @@ p {
   font-weight: 760;
 }
 
-.cheapest-route__track {
-  color: var(--muted-color);
-  font-size: 0.75rem;
-  line-height: 1.45;
-}
-
-.cheapest-route {
+.implied-value {
   display: grid;
   gap: 0.8rem;
   padding: 1rem;
   border-top: 1px solid var(--strong-rule);
 }
 
-.cheapest-route h2 {
+.implied-value h2 {
   font-size: 0.9rem;
   font-weight: 700;
 }
 
-.cheapest-route__verdict {
+.implied-value__verdict {
   max-width: 62ch;
   font-size: 0.9375rem;
   font-weight: 700;
   line-height: 1.4;
 }
 
-.cheapest-route__venues {
+.implied-value__venues {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
-.cheapest-route__venues > div {
+.implied-value__venues > div {
   display: grid;
   gap: 0.25rem;
   padding: 0.75rem 0.9rem;
@@ -1201,32 +1195,32 @@ p {
   border-left: 3px solid var(--rule-color);
 }
 
-.cheapest-route__venues > div[data-lead="true"] {
+.implied-value__venues > div[data-lead="true"] {
   border-left-color: var(--fair);
   background: color-mix(in oklch, var(--fair) 7%, transparent);
 }
 
-.cheapest-route__venues span {
+.implied-value__venues span {
   color: var(--muted-color);
   font-size: 0.6875rem;
   font-weight: 620;
 }
 
-.cheapest-route__venues strong {
+.implied-value__venues strong {
   font-size: 1.35rem;
   font-weight: 760;
   letter-spacing: -0.02em;
 }
 
-.cheapest-route__venues small,
-.cheapest-route__method {
+.implied-value__venues small,
+.implied-value__method {
   color: var(--muted-color);
   font-size: 0.6875rem;
   line-height: 1.45;
 }
 
 @media (max-width: 46rem) {
-  .cheapest-route__venues {
+  .implied-value__venues {
     grid-template-columns: minmax(0, 1fr);
   }
 

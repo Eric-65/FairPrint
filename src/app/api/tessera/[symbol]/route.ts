@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { describeArchiveError, getLatestArchivedLiquidity, getRouteTrackRecords } from "@/lib/archive";
 import { measureMarkedTrade, parseTradeInputs } from "@/lib/marked-trade";
 import { findTesseraSnapshot, isAllowedTesseraMint } from "@/lib/tessera";
 
@@ -49,43 +48,21 @@ export async function GET(
 
   try {
     const { notionalUsd, tolerancePct } = parseTradeInputs(request);
-    const comparisonSymbol = snapshot.comparison?.prestocks.symbol ?? null;
-    const [trade, preStocksDepth, trackRecords] = await Promise.all([
-      measureMarkedTrade({
-        venue: "tessera",
-        symbol: snapshot.token.symbol,
-        mint: snapshot.token.mint,
-        markPrice: snapshot.token.markPrice,
-        premiumPct: snapshot.premiumPct,
-        decimals: snapshot.tokenDecimals,
-        notionalUsd,
-        tolerancePct,
-      }),
-      // Archived only: the comparison never spends Jupiter quotes on another venue's mint.
-      comparisonSymbol
-        ? getLatestArchivedLiquidity("prestocks", [comparisonSymbol]).then(
-            (result) => result.data.find((reading) => reading.symbol === comparisonSymbol) ?? null,
-            (error: unknown) => {
-              console.error("[FairPrint tessera] Comparison depth read failed", { error: describeArchiveError(error) });
-              return null;
-            },
-          )
-        : Promise.resolve(null),
-      getRouteTrackRecords("7d").catch((error: unknown) => {
-        console.error("[FairPrint tessera] Track record read failed", { error: describeArchiveError(error) });
-        return { data: [], degradedReason: null };
-      }),
-    ]);
-    const trackRecord = trackRecords.data.find(
-      (record) => record.symbol === snapshot.token.symbol && record.compareSymbol === comparisonSymbol,
-    ) ?? null;
+    const trade = await measureMarkedTrade({
+      venue: "tessera",
+      symbol: snapshot.token.symbol,
+      mint: snapshot.token.mint,
+      markPrice: snapshot.token.markPrice,
+      premiumPct: snapshot.premiumPct,
+      decimals: snapshot.tokenDecimals,
+      notionalUsd,
+      tolerancePct,
+    });
 
     return NextResponse.json(
       {
         snapshot,
         ...trade,
-        comparisonDepth1PctUsd: preStocksDepth?.depth1PctUsd ?? null,
-        trackRecord,
         notionalUsd,
         tolerancePct,
         measuredAt: new Date().toISOString(),

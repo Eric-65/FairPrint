@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { describeArchiveError, getLatestArchivedLiquidity, getRouteTrackRecords } from "@/lib/archive";
+import { describeArchiveError, getLatestArchivedLiquidity } from "@/lib/archive";
 import { decideExecutionGate } from "@/lib/gate";
 import { getTesseraSnapshots, type TesseraSnapshot } from "@/lib/tessera";
 import type { TesseraWatchlistEntry, TesseraWatchlistResponse } from "@/lib/tessera-types";
@@ -17,10 +17,9 @@ export async function GET() {
   const fetchedAt = new Date().toISOString();
 
   let snapshots: TesseraSnapshot[] = [];
-  let comparisonError: string | null = null;
   let fetchError: string | null = null;
   try {
-    ({ snapshots, comparisonError } = await getTesseraSnapshots());
+    snapshots = await getTesseraSnapshots();
   } catch (error) {
     fetchError = error instanceof Error ? error.message : "Tessera fetch failed";
   }
@@ -33,11 +32,6 @@ export async function GET() {
     return { data: [], degradedReason: describeArchiveError(error) };
   });
   const liquidityBySymbol = new Map(archiveResult.data.map((reading) => [reading.symbol, reading]));
-  const trackRecords = await getRouteTrackRecords("7d").catch((error: unknown) => {
-    console.error("[FairPrint tessera] Track record read failed", { error });
-    return { data: [], degradedReason: describeArchiveError(error) };
-  });
-  const trackBySymbol = new Map(trackRecords.data.map((record) => [record.symbol, record]));
 
   const entries: TesseraWatchlistEntry[] = snapshots
     .map((snapshot) => {
@@ -59,10 +53,6 @@ export async function GET() {
         },
         gate: decision.gate,
         gateReason: decision.reason,
-        trackRecord:
-          trackBySymbol.get(snapshot.token.symbol)?.compareSymbol === snapshot.comparison?.prestocks.symbol
-            ? (trackBySymbol.get(snapshot.token.symbol) ?? null)
-            : null,
       };
     })
     .sort((a, b) => {
@@ -78,7 +68,6 @@ export async function GET() {
     fetchedAt,
     retryAfterSeconds: 15,
     archiveDegradedReason: fetchError ?? archiveResult.degradedReason,
-    comparisonError,
   };
 
   return NextResponse.json(response, {
