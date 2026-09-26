@@ -1224,8 +1224,27 @@ p {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* Four sections don't fit beside the wordmark on a phone, so the nav takes
+     its own row under it and scrolls sideways if a screen is narrower still. */
+  .site-head:has(.site-head__nav) {
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
+    padding-block: 0.9rem 0.6rem;
+  }
+
   .site-head__nav {
-    gap: 0.85rem;
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    gap: 1.25rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .site-head__nav a {
+    flex: none;
+    padding-block: 0.35rem;
+    font-size: 0.875rem;
   }
 }
 
@@ -2215,6 +2234,11 @@ p {
   font-size: 1.1rem;
   font-variant-numeric: tabular-nums;
   font-weight: 720;
+}
+
+.agent-check__degraded {
+  margin-top: 0.5rem;
+  overflow-wrap: anywhere;
 }
 
 .agent-check__skill {

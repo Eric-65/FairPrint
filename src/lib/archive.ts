@@ -475,6 +475,49 @@ export async function getLatestArchivedLiquidity(
   };
 }
 
+export interface ArchivedPrice {
+  onchainPrice: number;
+  referencePrice: number | null;
+  premiumPct: number | null;
+  observedAt: Date;
+}
+
+// The minute poller already records every xStock's live price, so a request
+// that loses its own Jupiter price call (rate limit, timeout) can fall back to
+// the newest reading instead of reporting nothing.
+export async function getLatestArchivedPrice(
+  symbol: string,
+  maxAgeMinutes = 5,
+  venue: ObservationVenue = "xstocks",
+): Promise<ArchivedPrice | null> {
+  const db = getDb();
+  if (!db) return null;
+
+  await ensureSchema(db);
+  const result = await db.execute(sql`
+    select
+      onchain_price as "onchainPrice",
+      reference_price as "referencePrice",
+      premium_pct as "premiumPct",
+      observed_at as "observedAt"
+    from ${observations}
+    where venue = ${venue}
+      and symbol = ${symbol}
+      and onchain_price is not null
+      and observed_at >= now() - make_interval(mins => ${maxAgeMinutes})
+    order by observed_at desc
+    limit 1
+  `);
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    onchainPrice: Number(row.onchainPrice),
+    referencePrice: row.referencePrice === null ? null : Number(row.referencePrice),
+    premiumPct: row.premiumPct === null ? null : Number(row.premiumPct),
+    observedAt: new Date(row.observedAt as string | Date),
+  };
+}
+
 export const HISTORY_RANGES = {
   "24h": { spanMs: 24 * 3_600_000, bucket: "15 minutes", bucketMs: 15 * 60_000 },
   "7d": { spanMs: 7 * 86_400_000, bucket: "1 hour", bucketMs: 60 * 60_000 },
