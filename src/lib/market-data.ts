@@ -1,3 +1,5 @@
+import { withBreaker } from "./circuit-breaker";
+
 const XSTOCKS_BASE_URL = "https://api.xstocks.fi/api/v2";
 const JUPITER_KEY_NAME = ["JUPITER", "API", "KEY"].join("_");
 // Keyless lite-api is capped at 30 requests/min (and deprecated); a free key
@@ -16,6 +18,16 @@ export function jupiterHeaders(): Record<string, string> {
 
 const HERMES_BASE_URL = "https://hermes.pyth.network";
 const REQUEST_TIMEOUT_MS = 8_000;
+// The issuer quote is the third-choice reference behind Pyth and Jupiter
+// stockData, and its host answers other paths in well under a second, so it
+// gets a shorter leash than a source we actually depend on.
+const ISSUER_TIMEOUT_MS = 3_000;
+// Bounded concurrency instead of a per-index delay: wall time then grows with
+// the number of symbols divided by the pool, not with the symbol count itself.
+const SNAPSHOT_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.SNAPSHOT_CONCURRENCY) || 6,
+);
 const PYTH_KEY_NAME = ["PYTH", "API", "KEY"].join("_");
 
 export type GateState = "fair" | "caution" | "overpay" | "unavailable";
@@ -164,11 +176,15 @@ export interface TickerSnapshot {
   };
 }
 
-async function fetchJson<T>(url: string, headers?: HeadersInit): Promise<T> {
+async function fetchJson<T>(
+  url: string,
+  headers?: HeadersInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
   const response = await fetch(url, {
     cache: "no-store",
     headers: { accept: "application/json", ...headers },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!response.ok) {
@@ -309,8 +325,12 @@ export async function getTickerSnapshot(
   );
   const hermesId = pythOracle?.metadata?.hermesId ?? null;
 
-  const issuerReferencePromise = fetchJson<{ quote: number | null }>(
-    `${XSTOCKS_BASE_URL}/public/assets/${encodeURIComponent(asset.symbol)}/price-data`,
+  const issuerReferencePromise = withBreaker("xStocks issuer quote", () =>
+    fetchJson<{ quote: number | null }>(
+      `${XSTOCKS_BASE_URL}/public/assets/${encodeURIComponent(asset.symbol)}/price-data`,
+      undefined,
+      ISSUER_TIMEOUT_MS,
+    ),
   ).then(
     (value) => ({ value, error: null }),
     (error: unknown) => ({
@@ -515,14 +535,18 @@ export async function getTickerSnapshots(
     assets.flatMap((asset) => (asset.mint ? [asset.mint] : [])),
   );
 
-  return Promise.all(
-    assets.map(async (asset, index) => {
+  const results: TickerSnapshotResult[] = new Array(assets.length);
+  let next = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= assets.length) return;
+      const asset = assets[index];
       try {
-        if (index > 0) {
-          await new Promise((resolve) => setTimeout(resolve, index * 700));
-        }
         const snapshot = await getTickerSnapshot(asset.symbol, jupiter);
-        return { symbol: asset.symbol, snapshot, error: null };
+        results[index] = { symbol: asset.symbol, snapshot, error: null };
       } catch (error) {
         const message = formatUpstreamError(error, "Fair-value measurement failed");
         console.error("[FairPrint] Ticker snapshot failed", {
@@ -530,8 +554,13 @@ export async function getTickerSnapshots(
           mint: asset.mint,
           error,
         });
-        return { symbol: asset.symbol, snapshot: null, error: message };
+        results[index] = { symbol: asset.symbol, snapshot: null, error: message };
       }
-    }),
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(SNAPSHOT_CONCURRENCY, assets.length) }, worker),
   );
+  return results;
 }

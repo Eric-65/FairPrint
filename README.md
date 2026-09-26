@@ -4,7 +4,7 @@
 
 FairPrint is a pre-trade execution-quality layer for tokenized equities on Solana. It keeps an executable token price separate from the underlying stock reference, measures the gap, measures how much the route can actually fill, and gates execution when either axis is unsafe.
 
-**Live demo:** [https://temporary-fleet-gust-kpypgd3.vercel.app](https://temporary-fleet-gust-kpypgd3.vercel.app)
+**Live demo:** [https://fairprint-brown.vercel.app](https://fairprint-brown.vercel.app)
 
 ## The problem
 
