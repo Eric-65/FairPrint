@@ -16,9 +16,14 @@ export interface AgentCheck {
   reason: string;
   premiumPct: number | null;
   onchainPrice: number | null;
+  // "archive" when the live price call failed and the minute poller's newest
+  // reading (at most 5 minutes old, see priceObservedAt) was used instead.
+  priceSource: "live" | "archive";
+  priceObservedAt: string | null;
   referencePrice: number | null;
   referenceSource: string | null;
   depth1PctUsd: number | null;
+  depthObservedAt: string | null;
   allInCostUsd: number | null;
   allInCostPct: number | null;
   market: { period: string; open: boolean; halted: boolean };
@@ -34,7 +39,12 @@ export async function checkXStockForAgent(
   notionalUsd: number,
   tolerancePct: number,
 ): Promise<AgentCheck> {
-  const { snapshot, depth, cost, costDegradedReason } = await measureXStockTrade(tracked, notionalUsd, tolerancePct);
+  const { snapshot, priceSource, priceObservedAt, depth, cost, costDegradedReason } = await measureXStockTrade(
+    tracked,
+    notionalUsd,
+    tolerancePct,
+    { preferArchivedDepth: true },
+  );
   const decision = decideExecutionGate({
     premiumPct: snapshot.premiumPct,
     maxFillableUsd: depth.depth1PctUsd,
@@ -55,9 +65,12 @@ export async function checkXStockForAgent(
     reason: decision.reason,
     premiumPct: snapshot.premiumPct,
     onchainPrice: snapshot.onchainPrice,
+    priceSource,
+    priceObservedAt,
     referencePrice: snapshot.referencePrice,
     referenceSource: snapshot.source.reference,
     depth1PctUsd: depth.depth1PctUsd,
+    depthObservedAt: depth.depth1PctUsd === null ? null : depth.observedAt,
     allInCostUsd: cost?.allInUsd ?? null,
     allInCostPct: cost?.allInPct ?? null,
     market: {

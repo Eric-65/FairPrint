@@ -142,14 +142,15 @@ function AgentCheckDemo({ symbols, defaultSymbol }: { symbols: string[]; default
   const { data, error, isPending, isFetching } = useQuery({
     queryKey: ["agent-check", query.symbol, query.notional],
     queryFn: () => fetchJson<AgentCheck>(path),
-    refetchInterval: 15_000,
+    // Each check spends Jupiter quota; 30s keeps a watching judge from starving the poller.
+    refetchInterval: 30_000,
   });
 
   return (
     <section className="agent-check" data-state={data?.verdict ?? "unavailable"} aria-labelledby="agent-check-title">
       <div className="section-rule">
         <h2 id="agent-check-title">The check every agent runs before it trades a stock</h2>
-        <p>Live, refreshed every 15 seconds</p>
+        <p>Live, refreshed every 30 seconds</p>
       </div>
 
       <div className="agent-check__inputs">
@@ -178,13 +179,14 @@ function AgentCheckDemo({ symbols, defaultSymbol }: { symbols: string[]; default
       {isPending ? (
         <div className="trade-panel-loading"><span className="skeleton skeleton--number" /><span>Measuring premium and depth</span></div>
       ) : error || !data ? (
-        <p className="watchlist-note">{error instanceof Error ? error.message : "Check unavailable."} Retrying in 15 seconds.</p>
+        <p className="watchlist-note">{error instanceof Error ? error.message : "Check unavailable."} Retrying in 30 seconds.</p>
       ) : (
         <div className="execution-gate" data-gate={data.verdict} data-refreshing={isFetching}>
           <div>
             <span>verdict · proceed: {String(data.proceed)}</span>
             <strong>{data.verdict}</strong>
             <p>{data.reason}</p>
+            {data.degraded && <p className="agent-check__degraded">Why: {data.degraded}.</p>}
           </div>
           <dl className="agent-check__fields">
             <div><dt>premiumPct</dt><dd>{signedPct(data.premiumPct, 3)}</dd></div>
@@ -192,7 +194,10 @@ function AgentCheckDemo({ symbols, defaultSymbol }: { symbols: string[]; default
             <div><dt>allInCostUsd</dt><dd>{data.allInCostUsd === null ? "—" : usd(Math.abs(data.allInCostUsd))}</dd></div>
             <div><dt>market.period</dt><dd>{data.market.period}</dd></div>
             <div><dt>referencePrice</dt><dd>{usd(data.referencePrice)}</dd></div>
-            <div><dt>onchainPrice</dt><dd>{usd(data.onchainPrice)}</dd></div>
+            <div>
+              <dt>onchainPrice{data.priceSource === "archive" ? " (recorded)" : ""}</dt>
+              <dd>{usd(data.onchainPrice)}</dd>
+            </div>
           </dl>
         </div>
       )}
@@ -211,7 +216,7 @@ export function AgentPanel({ symbols }: { symbols: string[] }) {
   const { data, error, isPending, isFetching } = useQuery({
     queryKey: ["agent-status"],
     queryFn: () => fetchJson<AgentStatusResponse>("/api/agent"),
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   });
   const quoteSymbol = data?.configured ? data.quote.symbol : data?.quoteSymbol ?? "TSLAx";
 
@@ -224,7 +229,7 @@ export function AgentPanel({ symbols }: { symbols: string[] }) {
         ) : error || !data ? (
           <>
             <h2 id="agent-hero-title">The FairPrint Agent</h2>
-            <p className="watchlist-note">{error instanceof Error ? error.message : "Agent token unavailable."} Retrying in 15 seconds.</p>
+            <p className="watchlist-note">{error instanceof Error ? error.message : "Agent token unavailable."} Retrying in 30 seconds.</p>
           </>
         ) : data.configured ? (
           <TokenReport status={data} />

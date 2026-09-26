@@ -44,6 +44,7 @@ Response fields that matter:
 | \`depth1PctUsd\` | Largest USD order that fills before 1% price impact |
 | \`allInCostUsd\` / \`allInCostPct\` | Premium + price impact + fees at your size, versus the reference |
 | \`market.period\` | \`market\`, \`extended\`, \`overnight\` or \`closed\` for the underlying exchange |
+| \`priceSource\` | \`live\`, or \`archive\` when the live price call failed and a reading at most 5 minutes old was used (see \`priceObservedAt\`) |
 | \`degraded\` | Non-null when a source was missing; treat as lower confidence |
 
 ## Decision rules
