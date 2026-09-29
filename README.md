@@ -58,6 +58,16 @@ Depth-aware execution gate with relative reference freshness. This real INTCx me
 
 FairPrint never labels an on-chain swap price as an official stock print and never replaces a missing feed with a guessed value.
 
+## Launch Lab (Meteora DBC)
+
+`/launch` designs Meteora Dynamic Bonding Curve launches for tokenized stocks and monitors live DBC pools against fair value.
+
+- **Fair-value anchor.** The token's fair price in the quote token is its share price divided by the quote's share price (xStocks issuer quote or Pyth). The quote xStock's own on-chain premium is measured and kept out of the anchor, and a launch-readiness gate holds while that premium exceeds 0.5%.
+- **Corridor curve.** Three segments built with the SDK's `buildCurveWithCustomSqrtPrices`: an opening discount (thin liquidity), a corridor of ± a few percent around fair value (dense liquidity, weight 6), then graduation above fair value (weight 2). Supply is sized so graduation lands on the requested dollar raise.
+- **Fees and graduation.** An exponential fee scheduler takes 3% down to 0.30% over the first hour, with dynamic fees on and fees collected in the quote token. The pool migrates to DAMM v2 at 0.25%, with LP permanently locked.
+- **Validated.** Every design runs through the SDK's `validateConfigParameters`. The page exports the config JSON and a `createConfigAndPool` script, including the token badge for xStock quotes.
+- **Monitor.** `/launch/pool/<address>?ref=<xStock>` reads a DBC pool from mainnet (`SOLANA_RPC_URL`, public RPC by default). It shows price in the quote token and in USD, progress to graduation, fees, and the basis against the referenced share price.
+
 ## For agents
 
 FairPrint is also a tool for autonomous agents that trade tokenized stocks.
