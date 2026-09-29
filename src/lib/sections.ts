@@ -1,11 +1,12 @@
-export type Section = "xstocks" | "prestocks" | "tessera" | "agent";
+export type Section = "xstocks" | "prestocks" | "tessera" | "launch" | "agent";
 
-const ALL_SECTIONS: readonly Section[] = ["xstocks", "prestocks", "tessera", "agent"];
+const ALL_SECTIONS: readonly Section[] = ["xstocks", "prestocks", "tessera", "launch", "agent"];
 
 export const SECTION_HOME: Record<Section, string> = {
   xstocks: "/",
   prestocks: "/prestocks",
   tessera: "/tessera",
+  launch: "/launch",
   agent: "/agent",
 };
 
@@ -13,6 +14,7 @@ export const SECTION_LABEL: Record<Section, string> = {
   xstocks: "xStocks",
   prestocks: "PreStocks",
   tessera: "Tessera",
+  launch: "Launch",
   agent: "Agent",
 };
 
@@ -40,6 +42,7 @@ export function sectionForPath(pathname: string): Section | null {
   if (pathname === "/tessera" || pathname.startsWith("/tessera/") || pathname.startsWith("/api/tessera")) {
     return "tessera";
   }
+  if (pathname === "/launch" || pathname.startsWith("/launch/") || pathname.startsWith("/api/launch")) return "launch";
   if (pathname === "/agent" || pathname.startsWith("/api/agent") || pathname === "/skill.md") return "agent";
   return null;
 }
